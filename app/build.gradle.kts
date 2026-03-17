@@ -11,7 +11,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.myapplication"
+        applicationId = "com.example.cadence"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
@@ -44,6 +44,7 @@ android {
 dependencies {
     implementation(files("libs/TarsosDSP-Android-latest.jar"))
     implementation(libs.androidx.core.ktx)
+    implementation(libs.androidx.core.splashscreen)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))

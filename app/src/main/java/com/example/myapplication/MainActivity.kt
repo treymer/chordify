@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import android.Manifest
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -10,6 +11,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -25,12 +27,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,18 +46,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.cos
 import androidx.core.content.ContextCompat
 import be.tarsos.dsp.AudioDispatcher
 import be.tarsos.dsp.io.android.AudioDispatcherFactory
 import be.tarsos.dsp.pitch.PitchDetectionHandler
 import be.tarsos.dsp.pitch.PitchProcessor
 import be.tarsos.dsp.pitch.PitchProcessor.PitchEstimationAlgorithm
-import com.example.myapplication.ui.theme.MyApplicationTheme
+import com.example.myapplication.ui.theme.CadenceTheme
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -66,6 +77,7 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 enum class AppMode {
+    HOME,
     TUNER,
     KEY_FINDER,
     METRONOME,
@@ -76,6 +88,7 @@ class MainActivity : ComponentActivity() {
 
     private var dispatcher: AudioDispatcher? = null
     private var tunerNote by mutableStateOf("--")
+    private var tunerCents by mutableStateOf(0f)
     private var isRecording by mutableStateOf(false)
 
     // State for Key Finder
@@ -98,12 +111,14 @@ class MainActivity : ComponentActivity() {
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
+            CadenceTheme {
                 MainScreen(
                     tunerNote = tunerNote,
+                    tunerCents = tunerCents,
                     isRecording = isRecording,
                     detectedKeyNotes = detectedKeyNotes,
                     foundKey = foundKey,
@@ -140,8 +155,10 @@ class MainActivity : ComponentActivity() {
                 runOnUiThread {
                     when (mode) {
                         AppMode.TUNER -> {
-                            val displayNoteNames = arrayOf("C", "C# / Db", "D", "D# / Eb", "E", "F", "F# / Gb", "G", "G# / Ab", "A", "A# / Bb", "B")
-                            tunerNote = displayNoteNames[midiNote % 12]
+                            tunerNote = noteNames[midiNote % 12]
+                            val exactNoteFreq = a4 * Math.pow(2.0, (midiNote - 69) / 12.0)
+                            tunerCents = (1200.0 * Math.log(pitchInHz.toDouble() / exactNoteFreq) / Math.log(2.0))
+                                .toFloat().coerceIn(-50f, 50f)
                         }
                         AppMode.KEY_FINDER -> {
                             val currentTime = System.currentTimeMillis()
@@ -159,6 +176,7 @@ class MainActivity : ComponentActivity() {
                         }
                         AppMode.METRONOME -> {}
                         AppMode.SUGGESTER -> {}
+                        AppMode.HOME -> {}
                     }
                 }
             }
@@ -170,6 +188,8 @@ class MainActivity : ComponentActivity() {
 
     private fun stopRecording() {
         isRecording = false
+        tunerNote = "--"
+        tunerCents = 0f
         dispatcher?.stop()
     }
 
@@ -302,6 +322,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainScreen(
     tunerNote: String,
+    tunerCents: Float,
     isRecording: Boolean,
     detectedKeyNotes: List<String>,
     foundKey: String,
@@ -315,7 +336,7 @@ fun MainScreen(
     onStopMetronome: () -> Unit,
     onBpmChange: (Int) -> Unit
 ) {
-    var appMode by remember { mutableStateOf(AppMode.TUNER) }
+    var appMode by remember { mutableStateOf(AppMode.HOME) }
 
     fun switchMode(mode: AppMode) {
         onResetKeyFinder()
@@ -329,10 +350,14 @@ fun MainScreen(
                 .padding(innerPadding)
                 .fillMaxSize()
         ) {
-            ModeSelector(selectedMode = appMode, onModeSelected = ::switchMode)
+            if (appMode != AppMode.HOME) {
+                ModeSelector(selectedMode = appMode, onModeSelected = ::switchMode)
+            }
             when (appMode) {
+                AppMode.HOME -> HomeScreen(onNavigate = ::switchMode)
                 AppMode.TUNER -> TunerScreen(
                     note = tunerNote,
+                    cents = tunerCents,
                     isRecording = isRecording,
                     onStartRecording = { onStartRecording(AppMode.TUNER) },
                     onStopRecording = onStopRecording
@@ -360,24 +385,49 @@ fun MainScreen(
 
 @Composable
 fun ModeSelector(selectedMode: AppMode, onModeSelected: (AppMode) -> Unit) {
-    Row(
+    val tabs = listOf(
+        AppMode.HOME      to "⌂  Home",
+        AppMode.TUNER     to "Tuner",
+        AppMode.KEY_FINDER to "Key Finder",
+        AppMode.METRONOME to "Metronome",
+        AppMode.SUGGESTER to "Suggest"
+    )
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.Center
+            .background(MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        TextButton(onClick = { onModeSelected(AppMode.TUNER) }, enabled = selectedMode != AppMode.TUNER) {
-            Text("Tuner")
+        Row(
+            modifier = Modifier
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            tabs.forEach { (mode, label) ->
+                val isSelected = selectedMode == mode
+                TextButton(
+                    onClick = { onModeSelected(mode) },
+                    modifier = Modifier.height(56.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = if (isSelected)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                    )
+                }
+            }
         }
-        TextButton(onClick = { onModeSelected(AppMode.KEY_FINDER) }, enabled = selectedMode != AppMode.KEY_FINDER) {
-            Text("Key Finder")
-        }
-        TextButton(onClick = { onModeSelected(AppMode.METRONOME) }, enabled = selectedMode != AppMode.METRONOME) {
-            Text("Metronome")
-        }
-        TextButton(onClick = { onModeSelected(AppMode.SUGGESTER) }, enabled = selectedMode != AppMode.SUGGESTER) {
-            Text("Suggest")
-        }
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outline,
+            thickness = 1.dp
+        )
     }
 }
 
@@ -391,7 +441,7 @@ fun MetronomeScreen(
     onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val beatColor = if (isBeat) Color.Green else Color(0xFF444444)
+    val beatColor = if (isBeat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
 
     Column(
         modifier = modifier.fillMaxSize(),
@@ -444,23 +494,22 @@ fun TunerScreen(
     onStartRecording: () -> Unit,
     onStopRecording: () -> Unit,
     note: String,
+    cents: Float,
     isRecording: Boolean
 ) {
-    var animatedEllipsis by remember { mutableStateOf("") }
-
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
-            while (true) {
-                animatedEllipsis = "."
-                delay(300)
-                animatedEllipsis = ".."
-                delay(300)
-                animatedEllipsis = "..."
-                delay(300)
-            }
-        } else {
-            animatedEllipsis = ""
-        }
+    val inTune = isRecording && note != "--" && abs(cents) <= 10f
+    val needleColor = when {
+        !isRecording || note == "--" -> MaterialTheme.colorScheme.onSurfaceVariant
+        abs(cents) <= 10f -> Color(0xFF4CAF50)
+        abs(cents) <= 25f -> Color(0xFFFF9800)
+        else -> Color(0xFFF44336)
+    }
+    val statusText = when {
+        !isRecording -> "Tap Start Tuning"
+        note == "--" -> "Listening..."
+        abs(cents) <= 10f -> "IN TUNE"
+        cents < 0 -> "FLAT  ♭"
+        else -> "SHARP ♯"
     }
 
     Column(
@@ -469,40 +518,147 @@ fun TunerScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Cadence",
-            style = MaterialTheme.typography.displaySmall,
+            text = "Tuner",
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = Color.Green
+            color = MaterialTheme.colorScheme.primary
         )
 
-        Spacer(Modifier.height(128.dp))
+        Spacer(Modifier.height(24.dp))
 
+        // Semicircle gauge
+        TunerGauge(cents = cents, needleColor = needleColor, isActive = isRecording && note != "--")
+
+        Spacer(Modifier.height(16.dp))
+
+        // Note name
         Text(
             text = note,
-            fontSize = 96.sp
+            fontSize = 72.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (inTune) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onBackground
         )
 
-        Box(modifier = Modifier.height(48.dp)) {
-            if (isRecording) {
-                Text(
-                    text = "Listening$animatedEllipsis",
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.align(Alignment.Center)
-                )
-            }
-        }
+        // Cents readout
+        Text(
+            text = if (isRecording && note != "--") "${if (cents >= 0) "+" else ""}${cents.toInt()}¢" else "",
+            style = MaterialTheme.typography.bodyLarge,
+            color = needleColor
+        )
 
-        Spacer(Modifier.height(80.dp))
+        Spacer(Modifier.height(8.dp))
+
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = needleColor
+        )
+
+        Spacer(Modifier.height(32.dp))
 
         if (isRecording) {
             Button(onClick = onStopRecording) {
-                Text("Stop Recording")
+                Text("Stop Tuning")
             }
         } else {
             Button(onClick = onStartRecording) {
-                Text("Start Recording")
+                Text("Start Tuning")
             }
         }
+    }
+}
+
+@Composable
+private fun TunerGauge(
+    cents: Float,
+    needleColor: Color,
+    isActive: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    val greenColor = Color(0xFF4CAF50)
+    val onSurface = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Canvas(
+        modifier = modifier.size(width = 260.dp, height = 140.dp)
+    ) {
+        val strokeWidth = 12.dp.toPx()
+        val needleStroke = 4.dp.toPx()
+        val radius = (size.width / 2f) - strokeWidth
+        val centerX = size.width / 2f
+        val centerY = size.height - 8.dp.toPx()
+
+        val arcRect = Size(radius * 2f, radius * 2f)
+        val arcTopLeft = Offset(centerX - radius, centerY - radius)
+
+        // Background arc (180° sweep from 180° start = left side to right)
+        drawArc(
+            color = trackColor,
+            startAngle = 180f,
+            sweepAngle = 180f,
+            useCenter = false,
+            topLeft = arcTopLeft,
+            size = arcRect,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
+        )
+
+        // Green in-tune zone (±10¢ = ±18° out of 90°)
+        val greenSweep = 36f  // 36° total for ±10¢ zone
+        drawArc(
+            color = greenColor.copy(alpha = 0.4f),
+            startAngle = 270f - greenSweep / 2f,
+            sweepAngle = greenSweep,
+            useCenter = false,
+            topLeft = arcTopLeft,
+            size = arcRect,
+            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt)
+        )
+
+        // Tick marks at ±50, ±25, 0
+        val tickAngles = listOf(180f, 202.5f, 225f, 247.5f, 270f, 292.5f, 315f, 337.5f, 360f)
+        val tickLabels = listOf("-50", "", "-25", "", "0", "", "+25", "", "+50")
+        tickAngles.forEachIndexed { i, angleDeg ->
+            val angleRad = Math.toRadians(angleDeg.toDouble())
+            val outerR = radius + strokeWidth / 2f
+            val innerR = radius - strokeWidth / 2f - 8.dp.toPx()
+            val isMajor = i % 2 == 0
+            val tickInnerR = if (isMajor) innerR - 4.dp.toPx() else innerR + 4.dp.toPx()
+            drawLine(
+                color = onSurface.copy(alpha = 0.5f),
+                start = Offset(
+                    centerX + (outerR * cos(angleRad)).toFloat(),
+                    centerY + (outerR * Math.sin(angleRad)).toFloat()
+                ),
+                end = Offset(
+                    centerX + (tickInnerR * cos(angleRad)).toFloat(),
+                    centerY + (tickInnerR * Math.sin(angleRad)).toFloat()
+                ),
+                strokeWidth = if (isMajor) 2.dp.toPx() else 1.dp.toPx()
+            )
+        }
+
+        // Needle
+        val needleAngleDeg = 270f + (cents / 50f) * 90f
+        val needleAngleRad = Math.toRadians(needleAngleDeg.toDouble())
+        val needleLength = radius - strokeWidth / 2f
+        drawLine(
+            color = if (isActive) needleColor else onSurface.copy(alpha = 0.3f),
+            start = Offset(centerX, centerY),
+            end = Offset(
+                centerX + (needleLength * cos(needleAngleRad)).toFloat(),
+                centerY + (needleLength * Math.sin(needleAngleRad)).toFloat()
+            ),
+            strokeWidth = needleStroke,
+            cap = StrokeCap.Round
+        )
+
+        // Center pivot dot
+        drawCircle(
+            color = onSurface,
+            radius = 6.dp.toPx(),
+            center = Offset(centerX, centerY)
+        )
     }
 }
 
@@ -515,21 +671,68 @@ fun KeyFinderScreen(
     onStart: () -> Unit,
     onReset: () -> Unit
 ) {
+    var animatedEllipsis by remember { mutableStateOf("") }
+    LaunchedEffect(isRecording) {
+        if (isRecording) {
+            while (true) {
+                animatedEllipsis = "."; delay(400)
+                animatedEllipsis = ".."; delay(400)
+                animatedEllipsis = "..."; delay(400)
+            }
+        } else {
+            animatedEllipsis = ""
+        }
+    }
+
+    val instructionText = when {
+        isRecording -> "Listening$animatedEllipsis"
+        notes.size >= 3 -> "Analysis complete"
+        notes.isEmpty() -> "Play 3 distinct notes"
+        else -> "Play ${3 - notes.size} more note${if (3 - notes.size == 1) "" else "s"}"
+    }
+
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text("Key Finder", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(32.dp))
+        Text("Key Finder", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = instructionText,
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
 
-        val instructionText = when {
-            isRecording && notes.size < 3 -> "Play ${3 - notes.size} more note(s)..."
-            notes.size >= 3 -> "Done!"
-            else -> "Play 3 notes to detect the key."
+        Spacer(Modifier.height(36.dp))
+
+        // Note pills
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            repeat(3) { index ->
+                val note = notes.getOrNull(index)
+                val filled = note != null
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(
+                            if (filled) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = note ?: "—",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (filled) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f)
+                    )
+                }
+            }
         }
-        Text(instructionText)
-        Spacer(Modifier.height(32.dp))
+
+        Spacer(Modifier.height(36.dp))
 
         val buttonText = when {
             isRecording -> "Listening..."
@@ -539,13 +742,42 @@ fun KeyFinderScreen(
         Button(onClick = if (notes.size >= 3) onReset else onStart, enabled = !isRecording) {
             Text(buttonText)
         }
-        Spacer(Modifier.height(48.dp))
 
-        Text("Detected Notes: [${notes.joinToString(", ")}]", style = MaterialTheme.typography.bodyLarge)
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(40.dp))
 
+        // Result display
         if (foundKey.isNotEmpty()) {
-            Text("Result: $foundKey", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            if (foundKey == "No matching key found") {
+                Text(
+                    text = "No matching key found",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.error
+                )
+            } else {
+                Text(
+                    text = "Possible Keys",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                val keys = foundKey.split(", ")
+                keys.forEach { key ->
+                    Box(
+                        modifier = Modifier
+                            .padding(vertical = 4.dp)
+                            .clip(MaterialTheme.shapes.medium)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(horizontal = 28.dp, vertical = 12.dp)
+                    ) {
+                        Text(
+                            text = key,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -553,15 +785,15 @@ fun KeyFinderScreen(
 @Preview(showBackground = true)
 @Composable
 fun TunerScreenPreview() {
-    MyApplicationTheme {
-        TunerScreen(onStartRecording = {}, onStopRecording = {}, note = "A# / Bb", isRecording = true)
+    CadenceTheme {
+        TunerScreen(onStartRecording = {}, onStopRecording = {}, note = "A#", cents = -12f, isRecording = true)
     }
 }
 
 @Preview(showBackground = true)
 @Composable
 fun KeyFinderScreenPreview() {
-    MyApplicationTheme {
+    CadenceTheme {
         KeyFinderScreen(notes = listOf("C", "G", "E"), isRecording = false, foundKey = "C Major", onStart = {}, onReset = {})
     }
 }
@@ -569,7 +801,7 @@ fun KeyFinderScreenPreview() {
 @Preview(showBackground = true)
 @Composable
 fun MetronomeScreenPreview() {
-    MyApplicationTheme {
+    CadenceTheme {
         MetronomeScreen(bpm = 120, isRunning = false, isBeat = false, onBpmChange = {}, onStart = {}, onStop = {})
     }
 }

@@ -1,17 +1,20 @@
-# Chordify
+# Cadence
 
-An Android music utility app with three tools: a chromatic tuner, a key finder, and a metronome.
+An Android music utility app with four tools: a chromatic tuner, a key finder, a metronome, and a chord/scale/arpeggio suggester.
 
 ## Features
 
 ### Tuner
-Listens to your microphone in real time and displays the nearest musical note. Useful for tuning instruments by ear.
+A chromatic tuner that listens to your microphone and shows the nearest note with a semicircle gauge displaying cents deviation (±50¢). Color-coded feedback — green when in tune (≤10¢), amber when close (≤25¢), red when off.
 
 ### Key Finder
-Detects the musical key of a song or progression. Play 3 distinct notes from the piece and the app identifies all matching major/minor keys.
+Detects the musical key of a song or progression. Play 3 distinct notes and the app identifies all matching major/minor keys, displayed as styled result cards.
 
 ### Metronome
 A tap-tempo metronome with an adjustable BPM (40–240). A green circle flashes on each beat and a synthesized click plays through the speaker. BPM can be dialed in with a slider or ±1/±10 increment buttons.
+
+### Suggester
+Select a genre (Rock, Blues, Jazz, Funk, Metal), key, and Major/Minor mode to get curated chord progressions, scales, and arpeggios. Shows the relative key and links to chord diagrams.
 
 ---
 
@@ -36,7 +39,7 @@ A tap-tempo metronome with an adjustable BPM (40–240). A green circle flashes 
 - Android SDK 36
 - A device or emulator running Android 7.0+
 
-> **Note:** The project sets `org.gradle.java.home` in `gradle.properties` to point at Android Studio's bundled JDK. If you're on a different OS or Android Studio is installed elsewhere, update that path.
+> **Note:** If Gradle fails with a JDK version error, set `org.gradle.java.home` in your local `~/.gradle/gradle.properties` to point at JDK 17. Android Studio's bundled JDK is at `/Applications/Android Studio.app/Contents/jbr/Contents/Home` on macOS.
 
 ---
 
@@ -45,8 +48,8 @@ A tap-tempo metronome with an adjustable BPM (40–240). A green circle flashes 
 Clone the repo and build a debug APK:
 
 ```bash
-git clone https://github.com/treymer/chordify.git
-cd chordify
+git clone https://github.com/treymer/cadence.git
+cd cadence
 ./gradlew assembleDebug
 ```
 
@@ -70,7 +73,7 @@ Your device must have USB debugging enabled (Settings → Developer Options → 
 
 ## Installing from a GitHub Release
 
-Every push to `main` triggers a CI build that attaches a debug APK to a [GitHub Release](https://github.com/treymer/chordify/releases).
+Every push to `main` triggers a CI build that attaches a debug APK to a [GitHub Release](https://github.com/treymer/cadence/releases).
 
 To sideload it:
 1. Download `app-debug.apk` from the latest release
@@ -81,13 +84,13 @@ To sideload it:
 
 ## CI/CD
 
-GitHub Actions runs on every push and pull request to `main`:
+GitHub Actions runs on every push and pull request to `main`. Pushes that only change documentation (e.g. `*.md` files) skip the workflow entirely — a release is only created when app code changes.
 
 | Job | Trigger | What it does |
 |-----|---------|-------------|
 | Unit Tests | Push + PR | `./gradlew test` |
 | Build | After tests pass | Builds debug APK, uploads as artifact (14-day retention) |
-| Release | Push to `main` only | Creates a GitHub Release with the APK attached |
+| Release | Code push to `main` only | Creates a GitHub Release with the APK attached |
 
 See [`.github/workflows/android.yml`](.github/workflows/android.yml) for the full pipeline.
 

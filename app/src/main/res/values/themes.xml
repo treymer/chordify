@@ -1,5 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.MyApplication" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.Cadence" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/tavern_brown</item>
+        <item name="android:statusBarColor">@color/tavern_brown</item>
+        <item name="android:navigationBarColor">@color/tavern_brown</item>
+    </style>
+
+    <style name="Theme.Cadence.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_splash</item>
+        <item name="windowSplashScreenIconBackgroundColor">@color/splash_background</item>
+        <item name="postSplashScreenTheme">@style/Theme.Cadence</item>
+    </style>
 </resources>
