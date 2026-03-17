@@ -35,7 +35,8 @@ import androidx.compose.ui.unit.sp
 
 // ── Data model ────────────────────────────────────────────────────────────────
 
-private val NOTE_NAMES = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+private val NOTE_NAMES         = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+private val NOTE_DISPLAY_NAMES = listOf("C", "C#/Db", "D", "D#/Eb", "E", "F", "F#/Gb", "G", "G#/Ab", "A", "A#/Bb", "B")
 private val GENRES = listOf("Rock", "Blues", "Jazz", "Funk", "Metal")
 
 private enum class ChordQuality(val suffix: String) {
@@ -55,6 +56,147 @@ private fun chordName(rootIndex: Int, degree: ChordDegree) =
 
 private fun relativeMinor(rootIndex: Int) = NOTE_NAMES[(rootIndex + 9) % 12] + " minor"
 private fun relativeMajor(rootIndex: Int) = NOTE_NAMES[(rootIndex + 3) % 12] + " major"
+
+// T T S T T T S  →  0 2 4 5 7 9 11
+private val MAJOR_INTERVALS = listOf(0, 2, 4, 5, 7, 9, 11)
+// T S T T S T T  →  0 2 3 5 7 8 10
+private val MINOR_INTERVALS = listOf(0, 2, 3, 5, 7, 8, 10)
+
+private fun scaleNotes(rootIndex: Int, isMajor: Boolean): List<String> =
+    (if (isMajor) MAJOR_INTERVALS else MINOR_INTERVALS)
+        .map { NOTE_DISPLAY_NAMES[(rootIndex + it) % 12] }
+
+// ── guitar-chords.org.uk URL helpers ─────────────────────────────────────────
+
+private const val GUITAR_CHORDS_BASE = "https://www.guitar-chords.org.uk"
+
+// Standard slug: f-sharp, b-flat (used by chords, scales, arpeggios)
+private fun noteToSlug(note: String): String = when (note) {
+    "C"  -> "c";   "C#" -> "c-sharp"
+    "D"  -> "d";   "D#" -> "d-sharp"
+    "E"  -> "e";   "F"  -> "f"
+    "F#" -> "f-sharp"; "G" -> "g"
+    "G#" -> "g-sharp"; "A" -> "a"
+    "A#" -> "a-sharp"; "B" -> "b"
+    else -> note.lowercase()
+}
+
+// Mode slug: fsharp, bflat — no hyphens (site inconsistency)
+private fun noteToModeSlug(note: String): String = when (note) {
+    "C"  -> "c";   "C#" -> "csharp"
+    "D"  -> "d";   "D#" -> "dsharp"
+    "E"  -> "e";   "F"  -> "f"
+    "F#" -> "fsharp"; "G" -> "g"
+    "G#" -> "gsharp"; "A" -> "a"
+    "A#" -> "asharp"; "B" -> "b"
+    else -> note.lowercase()
+}
+
+private fun qualityToSlug(quality: ChordQuality): String = when (quality) {
+    ChordQuality.MAJOR    -> "major"
+    ChordQuality.MINOR    -> "minor"
+    ChordQuality.DOM7     -> "dominant7"
+    ChordQuality.MAJ7     -> "major7"
+    ChordQuality.MIN7     -> "minor7"
+    ChordQuality.DIM      -> "diminished"
+    ChordQuality.HALF_DIM -> "half-diminished"
+}
+
+private fun chordPageUrl(note: String, quality: ChordQuality) =
+    "$GUITAR_CHORDS_BASE/${noteToSlug(note)}-${qualityToSlug(quality)}-chord.html"
+
+// Diatonic triad quality for a given interval in the selected key.
+// Major formula: I ii iii IV V vi vii° (Major, Minor, Minor, Major, Major, Minor, Dim)
+// Minor formula: i ii° III iv v VI VII (Minor, Dim, Major, Minor, Minor, Major, Major)
+private fun diatonicQuality(semitones: Int, isMajor: Boolean): ChordQuality =
+    if (isMajor) when (semitones % 12) {
+        0  -> ChordQuality.MAJOR
+        2  -> ChordQuality.MINOR
+        4  -> ChordQuality.MINOR
+        5  -> ChordQuality.MAJOR
+        7  -> ChordQuality.MAJOR
+        9  -> ChordQuality.MINOR
+        11 -> ChordQuality.DIM
+        else -> ChordQuality.MAJOR
+    } else when (semitones % 12) {
+        0  -> ChordQuality.MINOR
+        2  -> ChordQuality.DIM
+        3  -> ChordQuality.MAJOR
+        5  -> ChordQuality.MINOR
+        7  -> ChordQuality.MINOR
+        8  -> ChordQuality.MAJOR
+        10 -> ChordQuality.MAJOR
+        else -> ChordQuality.MINOR
+    }
+
+// For basic triads (Major/Minor) use the diatonic formula; keep genre-specific
+// qualities (DOM7, MAJ7, MIN7, DIM, HALF_DIM) exactly as defined in the progression.
+private fun effectiveQuality(degree: ChordDegree, isMajor: Boolean): ChordQuality =
+    when (degree.quality) {
+        ChordQuality.MAJOR, ChordQuality.MINOR -> diatonicQuality(degree.semitones, isMajor)
+        else -> degree.quality
+    }
+
+// Dynamic Roman numeral — uses the correct degree name for the selected key so
+// Minor mode shows VII/VI/III (natural minor) rather than bVII/bVI/bIII.
+private fun dynamicRoman(semitones: Int, quality: ChordQuality, isMajor: Boolean): String {
+    val base = if (isMajor) when (semitones % 12) {
+        0  -> "I";  1  -> "bII"; 2  -> "II";  3  -> "bIII"; 4  -> "III"
+        5  -> "IV"; 6  -> "bV";  7  -> "V";   8  -> "bVI";  9  -> "VI"
+        10 -> "bVII"; 11 -> "VII"; else -> "?"
+    } else when (semitones % 12) {
+        0  -> "I";  1  -> "bII"; 2  -> "II";  3  -> "III";  4  -> "bIV"
+        5  -> "IV"; 6  -> "bV";  7  -> "V";   8  -> "VI";   9  -> "bVII"
+        10 -> "VII"; 11 -> "VII#"; else -> "?"
+    }
+    return when (quality) {
+        ChordQuality.MAJOR    -> base
+        ChordQuality.MINOR    -> base.lowercase()
+        ChordQuality.DOM7     -> "${base}7"
+        ChordQuality.MAJ7     -> "${base}maj7"
+        ChordQuality.MIN7     -> "${base.lowercase()}7"
+        ChordQuality.DIM      -> "${base.lowercase()}°"
+        ChordQuality.HALF_DIM -> "${base.lowercase()}ø7"
+    }
+}
+
+private fun itemKey(item: String) =
+    item.substringBefore("(").substringBefore("  ").trim()
+
+private fun scalePageUrl(rootNote: String, item: String): String {
+    val key = itemKey(item)
+    val n = noteToSlug(rootNote)
+    val m = noteToModeSlug(rootNote)
+    return when {
+        key.startsWith("Pentatonic Minor") -> "$GUITAR_CHORDS_BASE/guitarscales/$n-minorpentatonic.html"
+        key.startsWith("Pentatonic Major") -> "$GUITAR_CHORDS_BASE/guitarscales/$n-majorpentatonic.html"
+        key.startsWith("Blues")            -> "$GUITAR_CHORDS_BASE/guitarscales/$n-bluesscale.html"
+        key.startsWith("Natural Minor")    -> "$GUITAR_CHORDS_BASE/guitarscales/$n-natural-minor-scale.html"
+        key.startsWith("Harmonic Minor")   -> "$GUITAR_CHORDS_BASE/guitarscales/$n-harmonic-minor-scale.html"
+        key.startsWith("Major")            -> "$GUITAR_CHORDS_BASE/guitarscales/$n-major-scale.html"
+        key.startsWith("Mixolydian")       -> "$GUITAR_CHORDS_BASE/modes/$m-mixolydian-mode.html"
+        key.startsWith("Dorian")           -> "$GUITAR_CHORDS_BASE/modes/$m-dorian-mode.html"
+        key.startsWith("Lydian")           -> "$GUITAR_CHORDS_BASE/modes/$m-lydian-mode.html"
+        key.startsWith("Phrygian")         -> "$GUITAR_CHORDS_BASE/modes/$m-phrygian-mode.html"
+        else -> "" // Diminished scale, Bebop Major — not on this site
+    }
+}
+
+private fun arpeggioPageUrl(rootNote: String, item: String): String {
+    val key = itemKey(item)
+    val n = noteToSlug(rootNote)
+    val slug = when {
+        key.startsWith("Major Triad")     -> "major"
+        key.startsWith("Minor Triad")     -> "minor"
+        key.startsWith("Dominant 7th")    -> "7"
+        key.startsWith("Minor 7th")       -> "minor7"
+        key.startsWith("Major 7th")       -> "major7"
+        key.startsWith("Major 6th")       -> "major6"
+        key.startsWith("Diminished")      -> "diminished"
+        else -> return "" // Half-diminished, Power Chord, 9th — not on this site
+    }
+    return "$GUITAR_CHORDS_BASE/arpeggios/$n-$slug-arpeggios.html"
+}
 
 // ── Genre data ────────────────────────────────────────────────────────────────
 
@@ -224,6 +366,8 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
     else
         "Relative major: ${NOTE_NAMES[(rootIndex + 3) % 12]} major"
 
+    val scaleNotesList = scaleNotes(rootIndex, isMajor)
+
     Column(modifier = modifier.fillMaxSize()) {
 
         // Genre selector
@@ -262,16 +406,22 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
             }
             Spacer(Modifier.height(4.dp))
             Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
-                NOTE_NAMES.forEach { note ->
+                NOTE_NAMES.forEachIndexed { i, note ->
                     FilterChip(
                         selected = selectedKey == note,
                         onClick = { selectedKey = note },
-                        label = { Text(note) },
+                        label = { Text(NOTE_DISPLAY_NAMES[i]) },
                         modifier = Modifier.padding(end = 6.dp)
                     )
                 }
             }
             Spacer(Modifier.height(6.dp))
+            Text(
+                scaleNotesList.joinToString(" – "),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(Modifier.height(2.dp))
             Text(
                 relativeKeyLabel,
                 style = MaterialTheme.typography.bodySmall,
@@ -291,15 +441,15 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
         }
 
         when (selectedTab) {
-            0 -> ProgressionsTab(data.progressions, rootIndex)
-            1 -> ItemListTab(data.scales, "scale")
-            2 -> ItemListTab(data.arpeggios, "arpeggio")
+            0 -> ProgressionsTab(data.progressions, rootIndex, isMajor)
+            1 -> ItemListTab(data.scales, selectedKey, ::scalePageUrl)
+            2 -> ItemListTab(data.arpeggios, selectedKey, ::arpeggioPageUrl)
         }
     }
 }
 
 @Composable
-private fun ProgressionsTab(progressions: List<Progression>, rootIndex: Int) {
+private fun ProgressionsTab(progressions: List<Progression>, rootIndex: Int, isMajor: Boolean) {
     val context = LocalContext.current
 
     Column(
@@ -322,13 +472,17 @@ private fun ProgressionsTab(progressions: List<Progression>, rootIndex: Int) {
                     )
                     Spacer(Modifier.height(8.dp))
                     Text(
-                        progression.degrees.joinToString(" – ") { it.roman },
+                        progression.degrees.joinToString(" – ") { d ->
+                            dynamicRoman(d.semitones, effectiveQuality(d, isMajor), isMajor)
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        progression.degrees.joinToString(" – ") { chordName(rootIndex, it) },
+                        progression.degrees.joinToString(" – ") { d ->
+                            NOTE_NAMES[(rootIndex + d.semitones) % 12] + effectiveQuality(d, isMajor).suffix
+                        },
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -341,16 +495,18 @@ private fun ProgressionsTab(progressions: List<Progression>, rootIndex: Int) {
                     )
                     Row(modifier = Modifier.horizontalScroll(rememberScrollState())) {
                         progression.degrees
-                            .map { chordName(rootIndex, it) }
-                            .distinct()
-                            .forEach { chord ->
+                            .distinctBy { d ->
+                                NOTE_NAMES[(rootIndex + d.semitones) % 12] + effectiveQuality(d, isMajor).suffix
+                            }
+                            .forEach { degree ->
+                                val note = NOTE_NAMES[(rootIndex + degree.semitones) % 12]
+                                val eq   = effectiveQuality(degree, isMajor)
+                                val name = note + eq.suffix
+                                val url  = chordPageUrl(note, eq)
                                 TextButton(onClick = {
-                                    val query = Uri.encode("$chord chord diagram guitar")
-                                    context.startActivity(
-                                        Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$query"))
-                                    )
+                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                                 }) {
-                                    Text(chord, fontSize = 13.sp)
+                                    Text(name, fontSize = 13.sp)
                                 }
                             }
                     }
@@ -361,7 +517,11 @@ private fun ProgressionsTab(progressions: List<Progression>, rootIndex: Int) {
 }
 
 @Composable
-private fun ItemListTab(items: List<String>, type: String) {
+private fun ItemListTab(
+    items: List<String>,
+    rootNote: String,
+    buildUrl: (rootNote: String, item: String) -> String
+) {
     val context = LocalContext.current
 
     Column(
@@ -384,13 +544,13 @@ private fun ItemListTab(items: List<String>, type: String) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(item, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-                    TextButton(onClick = {
-                        val query = Uri.encode("$item $type guitar")
-                        context.startActivity(
-                            Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com/search?q=$query"))
-                        )
-                    }) {
-                        Text("Diagram", fontSize = 12.sp)
+                    val url = buildUrl(rootNote, item)
+                    if (url.isNotEmpty()) {
+                        TextButton(onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        }) {
+                            Text("Diagram", fontSize = 12.sp)
+                        }
                     }
                 }
             }
