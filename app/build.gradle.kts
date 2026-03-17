@@ -11,7 +11,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.cadence"
+        applicationId = "dev.treymer.cadence"
         minSdk = 24
         targetSdk = 36
         versionCode = 1
