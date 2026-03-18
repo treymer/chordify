@@ -70,8 +70,7 @@ private fun scaleNotes(rootIndex: Int, isMajor: Boolean): List<String> =
 
 private const val GUITAR_CHORDS_BASE = "https://www.guitar-chords.org.uk"
 
-// Chord slug: uses sharp notation (D# = d-sharp, A# = a-sharp)
-// Note: chord pages for D#/A# may not exist; site has no Eb/Bb chord pages either
+// Chord slug (x-sharp format, used by chords section)
 private fun noteToSlug(note: String): String = when (note) {
     "C"  -> "c";   "C#" -> "c-sharp"
     "D"  -> "d";   "D#" -> "d-sharp"
@@ -82,24 +81,56 @@ private fun noteToSlug(note: String): String = when (note) {
     else -> note.lowercase()
 }
 
-// Scale/arpeggio slug: enharmonic flats for notes the site lists under flat names
-// D# = Eb (e-flat), G# = Ab (a-flat), A# = Bb (b-flat)
-private fun noteToScaleSlug(note: String): String = when (note) {
-    "D#" -> "e-flat"
-    "G#" -> "a-flat"
-    "A#" -> "b-flat"
+// Major / natural minor / harmonic minor scales + arpeggios:
+//   D# = e-flat, G# = a-flat, A# = b-flat
+// (verified from site directory listing)
+private fun noteToMajMinScaleSlug(note: String): String = when (note) {
+    "D#" -> "e-flat"; "G#" -> "a-flat"; "A#" -> "b-flat"
     else -> noteToSlug(note)
 }
 
-// Mode slug: no hyphens for sharps; enharmonic flats for D#/G#/A#
-private fun noteToModeSlug(note: String): String = when (note) {
-    "C"  -> "c";    "C#" -> "csharp"
-    "D"  -> "d";    "D#" -> "eflat"   // D# = Eb
-    "E"  -> "e";    "F"  -> "f"
-    "F#" -> "fsharp"; "G" -> "g"
-    "G#" -> "aflat";  "A" -> "a"      // G# = Ab
-    "A#" -> "bflat";  "B" -> "b"      // A# = Bb
-    else -> note.lowercase()
+// Pentatonic + blues scales:
+//   D# = e-flat, G# = g-sharp, A# = b-flat
+// (G# uses g-sharp here, not a-flat — verified from site directory listing)
+private fun noteToPentaBluesSlug(note: String): String = when (note) {
+    "D#" -> "e-flat"; "A#" -> "b-flat"
+    else -> noteToSlug(note) // G# → "g-sharp" naturally
+}
+
+// Mode URLs vary per mode — the site uses different enharmonic slugs
+// depending on which mode pages it actually created. Derived from the
+// full directory listing of guitar-chords.org.uk/modes/.
+private fun modeUrl(note: String, mode: String): String {
+    val slug: String? = when (mode) {
+        "dorian" -> when (note) {
+            "C" -> "c"; "C#" -> "csharp"; "D" -> "d"; "D#" -> "eflat"
+            "E" -> "e"; "F" -> "f"; "F#" -> "fsharp"; "G" -> "g"
+            "G#" -> "gsharp"; "A" -> "a"; "A#" -> "bflat"; "B" -> "b"
+            else -> null
+        }
+        "mixolydian" -> when (note) {
+            "C" -> "c"; "C#" -> "csharp"; "D" -> "d"; "D#" -> "eflat"
+            "E" -> "e"; "F" -> "f"; "F#" -> "fsharp"; "G" -> "g"
+            "G#" -> "aflat"; "A" -> "a"; "A#" -> "bflat"; "B" -> "b"
+            else -> null
+        }
+        "lydian" -> when (note) {
+            // csharp-lydian does not exist; all others verified present
+            "C" -> "c"; "D" -> "d"; "D#" -> "eflat"
+            "E" -> "e"; "F" -> "f"; "F#" -> "fsharp"; "G" -> "g"
+            "G#" -> "aflat"; "A" -> "a"; "A#" -> "bflat"; "B" -> "b"
+            else -> null
+        }
+        "phrygian" -> when (note) {
+            // D# uses dsharp (not eflat), G# uses gsharp — both verified present
+            "C" -> "c"; "C#" -> "csharp"; "D" -> "d"; "D#" -> "dsharp"
+            "E" -> "e"; "F" -> "f"; "F#" -> "fsharp"; "G" -> "g"
+            "G#" -> "gsharp"; "A" -> "a"; "A#" -> "bflat"; "B" -> "b"
+            else -> null
+        }
+        else -> null
+    }
+    return if (slug != null) "$GUITAR_CHORDS_BASE/modes/$slug-$mode-mode.html" else ""
 }
 
 private fun qualityToSlug(quality: ChordQuality): String = when (quality) {
@@ -173,40 +204,32 @@ private fun dynamicRoman(semitones: Int, quality: ChordQuality, isMajor: Boolean
 private fun itemKey(item: String) =
     item.substringBefore("(").substringBefore("  ").trim()
 
-// Pages confirmed missing on guitar-chords.org.uk (verified by URL fetch).
-// Key = note name, Value = scale/mode name prefix from itemKey().
-private val MISSING_SCALE_PAGES = setOf(
-    "G#" to "Pentatonic Minor",  // no a-flat-minorpentatonic.html
-    "G#" to "Pentatonic Major",  // no a-flat-majorpentatonic.html
-    "G#" to "Blues",             // no a-flat-bluesscale.html
-    "G#" to "Dorian",            // no aflat-dorian-mode.html
-    "G#" to "Phrygian",          // no aflat-phrygian-mode.html
-    "D#" to "Phrygian",          // no eflat-phrygian-mode.html
-)
-
 private fun scalePageUrl(rootNote: String, item: String): String {
     val key = itemKey(item)
-    if (MISSING_SCALE_PAGES.any { (note, prefix) -> rootNote == note && key.startsWith(prefix) }) return ""
-    val n = noteToScaleSlug(rootNote)
-    val m = noteToModeSlug(rootNote)
     return when {
-        key.startsWith("Pentatonic Minor") -> "$GUITAR_CHORDS_BASE/guitarscales/$n-minorpentatonic.html"
-        key.startsWith("Pentatonic Major") -> "$GUITAR_CHORDS_BASE/guitarscales/$n-majorpentatonic.html"
-        key.startsWith("Blues")            -> "$GUITAR_CHORDS_BASE/guitarscales/$n-bluesscale.html"
-        key.startsWith("Natural Minor")    -> "$GUITAR_CHORDS_BASE/guitarscales/$n-natural-minor-scale.html"
-        key.startsWith("Harmonic Minor")   -> "$GUITAR_CHORDS_BASE/guitarscales/$n-harmonic-minor-scale.html"
-        key.startsWith("Major")            -> "$GUITAR_CHORDS_BASE/guitarscales/$n-major-scale.html"
-        key.startsWith("Mixolydian")       -> "$GUITAR_CHORDS_BASE/modes/$m-mixolydian-mode.html"
-        key.startsWith("Dorian")           -> "$GUITAR_CHORDS_BASE/modes/$m-dorian-mode.html"
-        key.startsWith("Lydian")           -> "$GUITAR_CHORDS_BASE/modes/$m-lydian-mode.html"
-        key.startsWith("Phrygian")         -> "$GUITAR_CHORDS_BASE/modes/$m-phrygian-mode.html"
+        key.startsWith("Pentatonic Minor") ->
+            "$GUITAR_CHORDS_BASE/guitarscales/${noteToPentaBluesSlug(rootNote)}-minorpentatonic.html"
+        key.startsWith("Pentatonic Major") ->
+            "$GUITAR_CHORDS_BASE/guitarscales/${noteToPentaBluesSlug(rootNote)}-majorpentatonic.html"
+        key.startsWith("Blues")            ->
+            "$GUITAR_CHORDS_BASE/guitarscales/${noteToPentaBluesSlug(rootNote)}-bluesscale.html"
+        key.startsWith("Natural Minor")    ->
+            "$GUITAR_CHORDS_BASE/guitarscales/${noteToMajMinScaleSlug(rootNote)}-natural-minor-scale.html"
+        key.startsWith("Harmonic Minor")   ->
+            "$GUITAR_CHORDS_BASE/guitarscales/${noteToMajMinScaleSlug(rootNote)}-harmonic-minor-scale.html"
+        key.startsWith("Major")            ->
+            "$GUITAR_CHORDS_BASE/guitarscales/${noteToMajMinScaleSlug(rootNote)}-major-scale.html"
+        key.startsWith("Mixolydian")       -> modeUrl(rootNote, "mixolydian")
+        key.startsWith("Dorian")           -> modeUrl(rootNote, "dorian")
+        key.startsWith("Lydian")           -> modeUrl(rootNote, "lydian")
+        key.startsWith("Phrygian")         -> modeUrl(rootNote, "phrygian")
         else -> "" // Diminished scale, Bebop Major — not on this site
     }
 }
 
 private fun arpeggioPageUrl(rootNote: String, item: String): String {
     val key = itemKey(item)
-    val n = noteToScaleSlug(rootNote)
+    val n = noteToMajMinScaleSlug(rootNote)
     val slug = when {
         key.startsWith("Major Triad")     -> "major"
         key.startsWith("Minor Triad")     -> "minor"
