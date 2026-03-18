@@ -82,21 +82,23 @@ private fun noteToSlug(note: String): String = when (note) {
     else -> note.lowercase()
 }
 
-// Scale/arpeggio slug: D# and A# use flat enharmonic (e-flat, b-flat)
+// Scale/arpeggio slug: enharmonic flats for notes the site lists under flat names
+// D# = Eb (e-flat), G# = Ab (a-flat), A# = Bb (b-flat)
 private fun noteToScaleSlug(note: String): String = when (note) {
     "D#" -> "e-flat"
+    "G#" -> "a-flat"
     "A#" -> "b-flat"
     else -> noteToSlug(note)
 }
 
-// Mode slug: no hyphens for sharps; D# and A# use flat enharmonic (eflat, bflat)
+// Mode slug: no hyphens for sharps; enharmonic flats for D#/G#/A#
 private fun noteToModeSlug(note: String): String = when (note) {
-    "C"  -> "c";   "C#" -> "csharp"
-    "D"  -> "d";   "D#" -> "eflat"   // D# = Eb
-    "E"  -> "e";   "F"  -> "f"
+    "C"  -> "c";    "C#" -> "csharp"
+    "D"  -> "d";    "D#" -> "eflat"   // D# = Eb
+    "E"  -> "e";    "F"  -> "f"
     "F#" -> "fsharp"; "G" -> "g"
-    "G#" -> "gsharp"; "A" -> "a"
-    "A#" -> "bflat";  "B" -> "b"     // A# = Bb
+    "G#" -> "aflat";  "A" -> "a"      // G# = Ab
+    "A#" -> "bflat";  "B" -> "b"      // A# = Bb
     else -> note.lowercase()
 }
 
@@ -171,8 +173,20 @@ private fun dynamicRoman(semitones: Int, quality: ChordQuality, isMajor: Boolean
 private fun itemKey(item: String) =
     item.substringBefore("(").substringBefore("  ").trim()
 
+// Pages confirmed missing on guitar-chords.org.uk (verified by URL fetch).
+// Key = note name, Value = scale/mode name prefix from itemKey().
+private val MISSING_SCALE_PAGES = setOf(
+    "G#" to "Pentatonic Minor",  // no a-flat-minorpentatonic.html
+    "G#" to "Pentatonic Major",  // no a-flat-majorpentatonic.html
+    "G#" to "Blues",             // no a-flat-bluesscale.html
+    "G#" to "Dorian",            // no aflat-dorian-mode.html
+    "G#" to "Phrygian",          // no aflat-phrygian-mode.html
+    "D#" to "Phrygian",          // no eflat-phrygian-mode.html
+)
+
 private fun scalePageUrl(rootNote: String, item: String): String {
     val key = itemKey(item)
+    if (MISSING_SCALE_PAGES.any { (note, prefix) -> rootNote == note && key.startsWith(prefix) }) return ""
     val n = noteToScaleSlug(rootNote)
     val m = noteToModeSlug(rootNote)
     return when {
@@ -199,9 +213,8 @@ private fun arpeggioPageUrl(rootNote: String, item: String): String {
         key.startsWith("Dominant 7th")    -> "7"
         key.startsWith("Minor 7th")       -> "minor7"
         key.startsWith("Major 7th")       -> "major7"
-        key.startsWith("Major 6th")       -> "major6"
         key.startsWith("Diminished")      -> "diminished"
-        else -> return "" // Half-diminished, Power Chord, 9th — not on this site
+        else -> return "" // Major 6th, Half-diminished, Power Chord, 9th — not on this site
     }
     return "$GUITAR_CHORDS_BASE/arpeggios/$n-$slug-arpeggios.html"
 }
