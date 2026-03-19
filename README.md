@@ -1,6 +1,6 @@
 # Cadence
 
-An Android music utility app with four tools: a chromatic tuner, a key finder, a metronome, and a chord/scale/arpeggio suggester.
+An Android music utility app with six tools: a chromatic tuner, a key finder, a metronome, a music theory suggester, and a note finder.
 
 ## Features
 
@@ -13,8 +13,22 @@ Detects the musical key of a song or progression. Play 3 distinct notes and the 
 ### Metronome
 A tap-tempo metronome with an adjustable BPM (40–240). A green circle flashes on each beat and a synthesized click plays through the speaker. BPM can be dialed in with a slider or ±1/±10 increment buttons.
 
-### Suggester
-Select a genre (Rock, Blues, Jazz, Funk, Metal), key, and Major/Minor mode to get curated chord progressions, scales, and arpeggios. Shows the relative key and links to chord diagrams.
+### Theory
+Select a genre, key, and Major/Minor mode to get curated music theory content across six swipeable tabs:
+
+- **Progression** — chord progressions with Roman numeral analysis and links to chord diagrams
+- **Scales** — recommended scales with links to fingering diagrams
+- **Arpeggios** — genre-appropriate arpeggios with diagram links (Google Search fallback for arpeggios not on the reference site)
+- **Rhythm** — 5 strum patterns per genre displayed on a 16-subdivision grid with ↓/↑/✕ notation
+- **Intervals** — all 12 intervals from the selected root note with symbols, names, semitone counts, and resulting notes
+- **Extensions** — extended chord shapes (sus2, sus4, maj9, dom9, m9, dom11, dom13) with diagram links
+
+Supported genres: Rock, Blues, Jazz, Funk, Metal, Country, Reggae, Pop, R&B
+
+A **Capo helper** below the key selector suggests capo positions and open-chord shapes (C, D, E, G, A) to simplify playing in any key.
+
+### Note Finder
+Select any note and see every position it appears across the guitar neck, shown across two fretboard diagrams (frets 0–12 and 13–24). Inlay markers and fret numbers are included for reference.
 
 ---
 
@@ -71,26 +85,16 @@ Your device must have USB debugging enabled (Settings → Developer Options → 
 
 ---
 
-## Installing from a GitHub Release
-
-Every push to `main` triggers a CI build that attaches a debug APK to a [GitHub Release](https://github.com/treymer/cadence/releases).
-
-To sideload it:
-1. Download `app-debug.apk` from the latest release
-2. Transfer it to your Android device
-3. On the device, open the file — you may need to allow installs from unknown sources in Settings → Security
-
----
-
 ## CI/CD
 
-GitHub Actions runs on every push and pull request to `main`. Pushes that only change documentation (e.g. `*.md` files) skip the workflow entirely — a release is only created when app code changes.
+GitHub Actions runs on every push and pull request to `main`. Pushes that only change documentation (e.g. `*.md` files) skip the workflow entirely.
 
 | Job | Trigger | What it does |
 |-----|---------|-------------|
-| Unit Tests | Push + PR | `./gradlew test` |
-| Build | After tests pass | Builds debug APK, uploads as artifact (14-day retention) |
-| Release | Code push to `main` only | Creates a GitHub Release with the APK attached |
+| Unit Tests | Push + PR | `./gradlew testDebugUnitTest` |
+| Build | After tests pass | Builds signed release AAB, uploads as artifact (14-day retention) |
+| Release | Code push to `main` only | Creates a GitHub Release with the AAB attached |
+| Publish | Code push to `main` only | Uploads AAB to Google Play internal track |
 
 See [`.github/workflows/android.yml`](.github/workflows/android.yml) for the full pipeline.
 
@@ -102,4 +106,4 @@ See [`.github/workflows/android.yml`](.github/workflows/android.yml) for the ful
 |-----------|-----|
 | `RECORD_AUDIO` | Required by the Tuner and Key Finder to access the microphone |
 
-The Metronome does not require any permissions.
+The Metronome, Theory, and Note Finder features do not require any permissions.
