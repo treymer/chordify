@@ -18,6 +18,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -87,6 +88,46 @@ private val MAJOR_INTERVALS = listOf(0, 2, 4, 5, 7, 9, 11)
 // T S T T S T T  →  0 2 3 5 7 8 10
 private val MINOR_INTERVALS = listOf(0, 2, 3, 5, 7, 8, 10)
 
+// Capo: open-chord shapes and their root semitone from C
+private val OPEN_SHAPES = listOf("C" to 0, "D" to 2, "E" to 4, "G" to 7, "A" to 9)
+
+// Returns list of (shape, capoFret) sorted by capo fret, capped at fret 7
+private fun capoSuggestions(rootIndex: Int): List<Pair<String, Int>> =
+    OPEN_SHAPES.mapNotNull { (shape, shapeRoot) ->
+        val capo = (rootIndex - shapeRoot + 12) % 12
+        if (capo <= 7) shape to capo else null
+    }.sortedBy { it.second }
+
+// Interval table: symbol, name, semitones
+private val INTERVAL_DATA = listOf(
+    Triple("P1", "Unison",      0),
+    Triple("m2", "Min 2nd",     1),
+    Triple("M2", "Maj 2nd",     2),
+    Triple("m3", "Min 3rd",     3),
+    Triple("M3", "Maj 3rd",     4),
+    Triple("P4", "Perf 4th",    5),
+    Triple("TT", "Tritone",     6),
+    Triple("P5", "Perf 5th",    7),
+    Triple("m6", "Min 6th",     8),
+    Triple("M6", "Maj 6th",     9),
+    Triple("m7", "Min 7th",    10),
+    Triple("M7", "Maj 7th",    11)
+)
+
+// Chord extensions with verified guitar-chords.org.uk URL slugs
+private val EXTENSION_DATA = listOf(
+    "sus2"          to "sus2",
+    "sus4"          to "sus4",
+    "maj9"          to "major9",
+    "dom9 (9)"      to "dominant9",
+    "min9 (m9)"     to "minor9",
+    "dom11 (11)"    to "dominant11",
+    "dom13 (13)"    to "dominant13"
+)
+
+private fun extensionPageUrl(note: String, slug: String) =
+    "$GUITAR_CHORDS_BASE/${noteToSlug(note)}-$slug-chord.html"
+
 private fun scaleNotes(rootIndex: Int, isMajor: Boolean): List<String> =
     (if (isMajor) MAJOR_INTERVALS else MINOR_INTERVALS)
         .map { NOTE_DISPLAY_NAMES[(rootIndex + it) % 12] }
@@ -94,6 +135,9 @@ private fun scaleNotes(rootIndex: Int, isMajor: Boolean): List<String> =
 // ── guitar-chords.org.uk URL helpers ─────────────────────────────────────────
 
 private const val GUITAR_CHORDS_BASE = "https://www.guitar-chords.org.uk"
+
+private fun googleSearchUrl(note: String, suffix: String) =
+    "https://www.google.com/search?q=${(note + " " + suffix).replace(" ", "+")}"
 
 // Chord slug (x-sharp format, used by chords section)
 private fun noteToSlug(note: String): String = when (note) {
@@ -247,7 +291,7 @@ private fun scalePageUrl(rootNote: String, item: String): String {
         key.startsWith("Dorian")           -> modeUrl(rootNote, "dorian")
         key.startsWith("Lydian")           -> modeUrl(rootNote, "lydian")
         key.startsWith("Phrygian")         -> modeUrl(rootNote, "phrygian")
-        else -> "" // Diminished scale, Bebop Major — not on this site
+        else -> return googleSearchUrl(rootNote, "${key.lowercase()} scale guitar")
     }
 }
 
@@ -261,7 +305,7 @@ private fun arpeggioPageUrl(rootNote: String, item: String): String {
         key.startsWith("Minor 7th")       -> "minor7"
         key.startsWith("Major 7th")       -> "major7"
         key.startsWith("Diminished")      -> "diminished"
-        else -> return "" // Major 6th, Half-diminished, Power Chord, 9th — not on this site
+        else -> return googleSearchUrl(rootNote, "${key.lowercase()} arpeggio guitar")
     }
     return "$GUITAR_CHORDS_BASE/arpeggios/$n-$slug-arpeggios.html"
 }
@@ -295,14 +339,24 @@ private val GENRE_DATA = mapOf(
             ))
         ),
         scales = listOf("Pentatonic Minor", "Blues Scale", "Natural Minor (Aeolian)", "Major (Ionian)"),
-        arpeggios = listOf("Major Triad  (1 – 3 – 5)", "Minor Triad  (1 – b3 – 5)", "Dominant 7th  (1 – 3 – 5 – b7)"),
+        arpeggios = listOf(
+            "Major Triad  (1 – 3 – 5)",
+            "Minor Triad  (1 – b3 – 5)",
+            "Dominant 7th  (1 – 3 – 5 – b7)",
+            "Minor 7th  (1 – b3 – 5 – b7)",
+            "Power Chord  (1 – 5)"
+        ),
         rhythms = listOf(
             RhythmPattern("Classic Rock", "4/4",
                 beats(D,R,R,R, D,R,U,R, R,R,U,R, D,R,U,R)),
             RhythmPattern("Power Strokes", "4/4",
                 beats(D,R,R,R, D,R,R,R, D,R,R,R, D,R,R,R)),
             RhythmPattern("Straight 8ths", "4/4",
-                beats(D,R,U,R, D,R,U,R, D,R,U,R, D,R,U,R))
+                beats(D,R,U,R, D,R,U,R, D,R,U,R, D,R,U,R)),
+            RhythmPattern("Punk Rock", "4/4",
+                beats(D,R,D,R, D,R,D,R, D,R,D,R, D,R,D,R)),
+            RhythmPattern("Rock Ballad", "6/8",
+                beats(D,R,U, D,U,U))
         )
     ),
     "Blues" to GenreData(
@@ -332,14 +386,24 @@ private val GENRE_DATA = mapOf(
             ))
         ),
         scales = listOf("Blues Scale  (1 – b3 – 4 – b5 – 5 – b7)", "Pentatonic Minor", "Mixolydian", "Dorian"),
-        arpeggios = listOf("Dominant 7th  (1 – 3 – 5 – b7)", "Minor 7th  (1 – b3 – 5 – b7)", "Major 6th  (1 – 3 – 5 – 6)"),
+        arpeggios = listOf(
+            "Dominant 7th  (1 – 3 – 5 – b7)",
+            "Minor 7th  (1 – b3 – 5 – b7)",
+            "Major 6th  (1 – 3 – 5 – 6)",
+            "Diminished  (1 – b3 – b5)",
+            "Major Triad  (1 – 3 – 5)"
+        ),
         rhythms = listOf(
             RhythmPattern("Shuffle", "4/4",
                 beats(D,R,U,R, D,R,U,R, D,R,U,R, D,R,U,R)),
             RhythmPattern("12-Bar Accent", "4/4",
                 beats(D,R,R,R, R,R,U,R, D,R,R,R, R,R,U,R)),
             RhythmPattern("Slow Blues Ballad", "6/8",
-                beats(D,R,U, D,U,R))
+                beats(D,R,U, D,U,R)),
+            RhythmPattern("Jump Blues", "4/4",
+                beats(D,R,U,R, D,U,R,U, D,R,U,R, D,U,R,U)),
+            RhythmPattern("Slow Drag", "4/4",
+                beats(D,R,R,R, D,R,R,U, R,R,D,R, D,R,U,R))
         )
     ),
     "Jazz" to GenreData(
@@ -372,7 +436,9 @@ private val GENRE_DATA = mapOf(
             "Major 7th  (1 – 3 – 5 – 7)",
             "Minor 7th  (1 – b3 – 5 – b7)",
             "Dominant 7th  (1 – 3 – 5 – b7)",
-            "Half-diminished  (1 – b3 – b5 – b7)"
+            "Half-diminished  (1 – b3 – b5 – b7)",
+            "Diminished  (1 – b3 – b5)",
+            "Major 6th  (1 – 3 – 5 – 6)"
         ),
         rhythms = listOf(
             RhythmPattern("Freddie Green", "4/4",
@@ -380,7 +446,11 @@ private val GENRE_DATA = mapOf(
             RhythmPattern("Bossa Nova", "4/4",
                 beats(D,R,R,U, R,U,D,R, D,R,R,U, R,U,D,R)),
             RhythmPattern("Jazz Waltz", "6/8",
-                beats(D,R,U, R,U,R))
+                beats(D,R,U, R,U,R)),
+            RhythmPattern("Swing Comp", "4/4",
+                beats(D,R,R,R, R,R,U,R, D,R,R,R, R,R,U,R)),
+            RhythmPattern("Latin Jazz", "4/4",
+                beats(D,R,U,R, R,D,R,U, D,R,R,U, R,D,R,U))
         )
     ),
     "Funk" to GenreData(
@@ -403,14 +473,24 @@ private val GENRE_DATA = mapOf(
             ))
         ),
         scales = listOf("Pentatonic Minor", "Dorian", "Mixolydian"),
-        arpeggios = listOf("Dominant 7th  (1 – 3 – 5 – b7)", "Minor 7th  (1 – b3 – 5 – b7)", "9th Chord  (1 – 3 – 5 – b7 – 9)"),
+        arpeggios = listOf(
+            "Dominant 7th  (1 – 3 – 5 – b7)",
+            "Minor 7th  (1 – b3 – 5 – b7)",
+            "Major 7th  (1 – 3 – 5 – 7)",
+            "9th Chord  (1 – 3 – 5 – b7 – 9)",
+            "Minor Triad  (1 – b3 – 5)"
+        ),
         rhythms = listOf(
             RhythmPattern("16th Groove", "4/4",
                 beats(D,R,U,U, D,R,U,R, D,U,R,U, D,R,U,R)),
             RhythmPattern("Ghost Notes", "4/4",
                 beats(D,R,X,U, D,R,X,R, D,U,X,U, D,R,X,U)),
             RhythmPattern("Two-Chord Vamp", "4/4",
-                beats(D,R,R,U, R,U,R,U, D,R,R,U, R,U,R,U))
+                beats(D,R,R,U, R,U,R,U, D,R,R,U, R,U,R,U)),
+            RhythmPattern("Clavinet", "4/4",
+                beats(X,D,R,U, X,D,R,U, X,D,R,U, X,D,R,U)),
+            RhythmPattern("Syncopated Stab", "4/4",
+                beats(R,D,R,U, D,R,U,D, R,U,D,R, U,D,R,U))
         )
     ),
     "Metal" to GenreData(
@@ -442,7 +522,9 @@ private val GENRE_DATA = mapOf(
             "Minor Triad  (1 – b3 – 5)",
             "Diminished  (1 – b3 – b5)",
             "Power Chord  (1 – 5)",
-            "Minor 7th  (1 – b3 – 5 – b7)"
+            "Minor 7th  (1 – b3 – 5 – b7)",
+            "Half-diminished  (1 – b3 – b5 – b7)",
+            "Major Triad  (1 – 3 – 5)"
         ),
         rhythms = listOf(
             RhythmPattern("Gallop", "4/4",
@@ -450,7 +532,11 @@ private val GENRE_DATA = mapOf(
             RhythmPattern("16th Chug", "4/4",
                 beats(D,D,D,D, D,D,D,D, D,D,D,D, D,D,D,D)),
             RhythmPattern("Syncopated Riff", "4/4",
-                beats(D,R,R,U, D,D,R,U, D,R,R,U, D,D,R,R))
+                beats(D,R,R,U, D,D,R,U, D,R,R,U, D,D,R,R)),
+            RhythmPattern("Palm Mute Groove", "4/4",
+                beats(X,X,X,D, X,X,D,X, X,X,X,D, D,D,D,R)),
+            RhythmPattern("Half-Time Breakdown", "4/4",
+                beats(D,R,R,R, R,R,R,R, D,R,R,U, D,R,R,R))
         )
     ),
     "Country" to GenreData(
@@ -477,7 +563,9 @@ private val GENRE_DATA = mapOf(
         arpeggios = listOf(
             "Major Triad  (1 – 3 – 5)",
             "Dominant 7th  (1 – 3 – 5 – b7)",
-            "Major 7th  (1 – 3 – 5 – 7)"
+            "Major 7th  (1 – 3 – 5 – 7)",
+            "Major 6th  (1 – 3 – 5 – 6)",
+            "Minor Triad  (1 – b3 – 5)"
         ),
         rhythms = listOf(
             RhythmPattern("Boom-Chick", "4/4",
@@ -485,7 +573,11 @@ private val GENRE_DATA = mapOf(
             RhythmPattern("Country Shuffle", "4/4",
                 beats(D,R,U,R, D,R,U,R, D,R,U,R, D,R,U,R)),
             RhythmPattern("Train Beat", "4/4",
-                beats(D,R,R,U, D,R,U,R, D,R,R,U, D,R,U,R))
+                beats(D,R,R,U, D,R,U,R, D,R,R,U, D,R,U,R)),
+            RhythmPattern("Country Waltz", "6/8",
+                beats(D,R,U, D,R,U)),
+            RhythmPattern("Chicken Pickin'", "4/4",
+                beats(D,R,U,U, D,R,U,R, D,U,U,R, D,R,U,U))
         )
     ),
     "Reggae" to GenreData(
@@ -511,7 +603,9 @@ private val GENRE_DATA = mapOf(
         arpeggios = listOf(
             "Minor Triad  (1 – b3 – 5)",
             "Major Triad  (1 – 3 – 5)",
-            "Minor 7th  (1 – b3 – 5 – b7)"
+            "Minor 7th  (1 – b3 – 5 – b7)",
+            "Major 7th  (1 – 3 – 5 – 7)",
+            "Dominant 7th  (1 – 3 – 5 – b7)"
         ),
         rhythms = listOf(
             RhythmPattern("One Drop Skank", "4/4",
@@ -519,7 +613,11 @@ private val GENRE_DATA = mapOf(
             RhythmPattern("Rockers", "4/4",
                 beats(R,R,U,R, D,R,U,R, R,R,U,R, D,R,U,R)),
             RhythmPattern("Ska Upstroke", "4/4",
-                beats(D,R,U,R, R,R,U,R, R,R,U,R, R,R,U,R))
+                beats(D,R,U,R, R,R,U,R, R,R,U,R, R,R,U,R)),
+            RhythmPattern("Bubble", "4/4",
+                beats(R,U,R,U, R,U,R,U, R,U,R,U, R,U,R,U)),
+            RhythmPattern("Dancehall", "4/4",
+                beats(R,R,U,U, D,R,U,R, R,R,U,U, D,R,U,R))
         )
     ),
     "Pop" to GenreData(
@@ -547,7 +645,9 @@ private val GENRE_DATA = mapOf(
         arpeggios = listOf(
             "Major Triad  (1 – 3 – 5)",
             "Minor Triad  (1 – b3 – 5)",
-            "Major 7th  (1 – 3 – 5 – 7)"
+            "Major 7th  (1 – 3 – 5 – 7)",
+            "Minor 7th  (1 – b3 – 5 – b7)",
+            "Dominant 7th  (1 – 3 – 5 – b7)"
         ),
         rhythms = listOf(
             RhythmPattern("Pop Strum", "4/4",
@@ -555,7 +655,11 @@ private val GENRE_DATA = mapOf(
             RhythmPattern("Upbeat Pop", "4/4",
                 beats(D,R,U,U, D,R,U,R, R,U,D,R, U,R,U,R)),
             RhythmPattern("Pop Ballad", "6/8",
-                beats(D,U,U, D,U,U))
+                beats(D,U,U, D,U,U)),
+            RhythmPattern("Teen Pop", "4/4",
+                beats(D,R,U,R, D,U,R,U, D,R,U,R, D,U,R,U)),
+            RhythmPattern("Modern Syncopated", "4/4",
+                beats(D,R,R,U, D,U,R,D, R,U,D,R, U,R,D,R))
         )
     ),
     "R&B" to GenreData(
@@ -581,7 +685,9 @@ private val GENRE_DATA = mapOf(
         arpeggios = listOf(
             "Minor 7th  (1 – b3 – 5 – b7)",
             "Dominant 7th  (1 – 3 – 5 – b7)",
-            "Major 7th  (1 – 3 – 5 – 7)"
+            "Major 7th  (1 – 3 – 5 – 7)",
+            "Major 6th  (1 – 3 – 5 – 6)",
+            "9th Chord  (1 – 3 – 5 – b7 – 9)"
         ),
         rhythms = listOf(
             RhythmPattern("Soul Groove", "4/4",
@@ -589,7 +695,11 @@ private val GENRE_DATA = mapOf(
             RhythmPattern("Neo-Soul 16ths", "4/4",
                 beats(D,R,U,X, R,U,D,R, X,U,R,U, D,R,X,U)),
             RhythmPattern("R&B Ballad", "6/8",
-                beats(D,R,U, D,U,R))
+                beats(D,R,U, D,U,R)),
+            RhythmPattern("Smooth R&B", "4/4",
+                beats(D,R,U,R, R,U,D,R, R,R,U,R, D,R,U,R)),
+            RhythmPattern("Church Groove", "4/4",
+                beats(D,R,U,U, R,D,R,U, D,R,U,R, R,U,D,R))
         )
     )
 )
@@ -601,7 +711,7 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
     var selectedGenre by remember { mutableStateOf("Rock") }
     var selectedKey by remember { mutableStateOf("C") }
     var isMajor by remember { mutableStateOf(true) }
-    val pagerState = rememberPagerState(pageCount = { 4 })
+    val pagerState = rememberPagerState(pageCount = { 6 })
     val selectedTab = pagerState.currentPage
     val scope = rememberCoroutineScope()
 
@@ -676,11 +786,32 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.primary
             )
+            Spacer(Modifier.height(6.dp))
+            // Capo helper
+            val capos = capoSuggestions(rootIndex)
+            if (capos.isNotEmpty()) {
+                Text(
+                    "Capo shortcuts:",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(2.dp))
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    capos.forEach { (shape, fret) ->
+                        val label = if (fret == 0) "$shape (no capo)" else "Capo $fret → $shape shape"
+                        SuggestionChip(
+                            onClick = {},
+                            label = { Text(label, fontSize = 11.sp) }
+                        )
+                    }
+                }
+            }
         }
 
         // Tabs
         ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
-            listOf("Progression", "Scales", "Arpeggios", "Rhythm").forEachIndexed { index, title ->
+            listOf("Progression", "Scales", "Arpeggios", "Rhythm", "Intervals", "Extensions").forEachIndexed { index, title ->
                 Tab(
                     selected = selectedTab == index,
                     onClick  = { scope.launch { pagerState.animateScrollToPage(index) } },
@@ -698,6 +829,8 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
                 1 -> ItemListTab(data.scales, selectedKey, ::scalePageUrl)
                 2 -> ItemListTab(data.arpeggios, selectedKey, ::arpeggioPageUrl)
                 3 -> RhythmTab(data.rhythms)
+                4 -> IntervalsTab(rootIndex)
+                5 -> ExtensionsTab(selectedKey)
             }
         }
     }
@@ -801,10 +934,11 @@ private fun ItemListTab(
                     Text(item, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                     val url = buildUrl(rootNote, item)
                     if (url.isNotEmpty()) {
+                        val isSearch = url.contains("google.com")
                         TextButton(onClick = {
                             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
                         }) {
-                            Text("Diagram", fontSize = 12.sp)
+                            Text(if (isSearch) "Search" else "Diagram", fontSize = 12.sp)
                         }
                     }
                 }
@@ -822,6 +956,27 @@ private fun RhythmTab(patterns: List<RhythmPattern>) {
             .fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Legend
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            listOf(
+                Triple("↓", "Down strum",  MaterialTheme.colorScheme.primary),
+                Triple("↑", "Up strum",    MaterialTheme.colorScheme.error),
+                Triple("✕", "Muted strum", MaterialTheme.colorScheme.onSurfaceVariant)
+            ).forEach { (symbol, label, color) ->
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(symbol, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = color)
+                    Text(label, style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+
         patterns.forEach { pattern ->
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -855,11 +1010,125 @@ private fun RhythmTab(patterns: List<RhythmPattern>) {
 }
 
 @Composable
+private fun IntervalsTab(rootIndex: Int) {
+    Column(
+        modifier = Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            "Intervals from ${NOTE_DISPLAY_NAMES[rootIndex]}",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(4.dp))
+        INTERVAL_DATA.forEach { (symbol, name, semitones) ->
+            val resultNote = NOTE_DISPLAY_NAMES[(rootIndex + semitones) % 12]
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 16.dp, vertical = 10.dp)
+                        .fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Symbol badge
+                    Text(
+                        symbol,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    // Interval name
+                    Text(
+                        name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    // Semitone count
+                    Text(
+                        if (semitones == 1) "1 semitone" else "$semitones semitones",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    // Result note
+                    Text(
+                        resultNote,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ExtensionsTab(rootNote: String) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            "Chord Extensions for $rootNote",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(4.dp))
+        EXTENSION_DATA.forEach { (label, slug) ->
+            val chordName = "$rootNote${label.substringBefore(" ")}"
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .padding(start = 16.dp, end = 4.dp)
+                        .fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(vertical = 10.dp)) {
+                        Text(chordName, fontWeight = FontWeight.Bold, fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.primary)
+                        if (label.contains("(")) {
+                            Text(
+                                label.substringAfter("(").trimEnd(')'),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                    TextButton(onClick = {
+                        val url = extensionPageUrl(rootNote, slug)
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    }) {
+                        Text("Diagram", fontSize = 12.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun BeatGrid(pattern: RhythmPattern) {
     val labels  = if (pattern.timeSig == "6/8") LABELS_6_8 else LABELS_4_4
     val accents = if (pattern.timeSig == "6/8") ACCENTS_6_8 else ACCENTS_4_4
     val primary = MaterialTheme.colorScheme.primary
-    val secondary = MaterialTheme.colorScheme.secondary
+    val upColor = MaterialTheme.colorScheme.error
     val muted   = MaterialTheme.colorScheme.onSurfaceVariant
 
     // For 4/4 split into two rows of 8; 6/8 is a single row of 6
@@ -892,7 +1161,7 @@ private fun BeatGrid(pattern: RhythmPattern) {
                             fontWeight = FontWeight.Bold,
                             color = when (strum) {
                                 Strum.DOWN  -> primary
-                                Strum.UP    -> secondary
+                                Strum.UP    -> upColor
                                 Strum.MUTED -> muted
                                 Strum.REST  -> muted.copy(alpha = 0f)
                             }
