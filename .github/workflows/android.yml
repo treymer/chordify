@@ -118,4 +118,4 @@ jobs:
           packageName: dev.treymer.cadence
           releaseFiles: app-release.aab
           track: internal
-          status: completed
+          status: draft
