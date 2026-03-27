@@ -321,6 +321,9 @@ class MainActivity : ComponentActivity() {
 
             audioTrack.play()
 
+            // Used to compensate if write() returns early (e.g. first beat with empty buffer)
+            var nextBeatNs = System.nanoTime()
+
             try {
                 while (isActive) {
                     val samplesPerBeat = (sampleRate * 60.0 / metronomeBpm).toInt()
@@ -334,6 +337,13 @@ class MainActivity : ComponentActivity() {
 
                     // Blocks for ~one beat period while the hardware drains the buffer
                     audioTrack.write(beatBuffer, 0, beatBuffer.size)
+
+                    // On the first beat the buffer starts empty, so write() returns slightly
+                    // early. Use wall-clock time to pad any remaining time so every beat
+                    // interval is uniform.
+                    nextBeatNs += 60_000_000_000L / metronomeBpm
+                    val driftNs = nextBeatNs - System.nanoTime()
+                    if (driftNs > 1_000_000L) delay(driftNs / 1_000_000L)
                 }
             } finally {
                 audioTrack.stop()

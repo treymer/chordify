@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -119,6 +120,84 @@ private val COF_MINOR_NOTES   = listOf(9, 4, 11, 6, 1, 8, 3, 10, 5, 0, 7, 2)
 // Display names for the CoF (using conventional flat spellings on the flat side)
 private val COF_MAJOR_DISPLAY = listOf("C","G","D","A","E","B","F#","Db","Ab","Eb","Bb","F")
 private val COF_MINOR_DISPLAY = listOf("Am","Em","Bm","F#m","C#m","G#m","D#m","Bbm","Fm","Cm","Gm","Dm")
+
+// Triad types: formula, intervals (semitones from root), sound description
+private data class TriadType(
+    val name: String,
+    val suffix: String,
+    val formula: String,
+    val intervals: List<Int>,
+    val intervalStructure: String,
+    val sound: String
+)
+private val TRIAD_TYPES = listOf(
+    TriadType("Major",      "",  "1 – 3 – 5",   listOf(0, 4, 7), "Major 3rd + Minor 3rd", "Bright, stable"),
+    TriadType("Minor",      "m", "1 – ♭3 – 5",  listOf(0, 3, 7), "Minor 3rd + Major 3rd", "Dark, melancholic"),
+    TriadType("Diminished", "°", "1 – ♭3 – ♭5", listOf(0, 3, 6), "Minor 3rd + Minor 3rd", "Tense, unstable"),
+    TriadType("Augmented",  "+", "1 – 3 – ♯5",  listOf(0, 4, 8), "Major 3rd + Major 3rd", "Dreamy, unresolved"),
+)
+
+// Triad string sets for shape computation (strings ordered low → high pitch)
+// openNotes: semitone index 0-11; openPitches: relative MIDI (E2=40 base)
+private data class StringSet(
+    val name: String,
+    val labels: List<String>,   // [low, mid, high]
+    val openNotes: List<Int>,   // [low, mid, high] note index 0-11
+    val openPitches: List<Int>  // [low, mid, high] absolute pitch for octave ordering
+)
+private val TRIAD_STRING_SETS = listOf(
+    StringSet("G · B · e", listOf("G","B","e"), listOf(7,11,4), listOf(55,59,64)),
+    StringSet("D · G · B", listOf("D","G","B"), listOf(2,7,11), listOf(50,55,59)),
+    StringSet("A · D · G", listOf("A","D","G"), listOf(9,2,7),  listOf(45,50,55)),
+)
+
+// Computes fret positions for all 3 inversions of a triad on a given string set.
+// For each string, tries both the base fret and base+12, then picks the combination
+// with the smallest span that maintains ascending pitch order.
+// Returns list of Pair<frets [low,mid,high], inversionLabel>
+private fun triadShapes(
+    noteIndices: List<Int>,  // [root, 3rd, 5th] as note indices 0-11
+    ss: StringSet
+): List<Pair<List<Int>, String>> {
+    val inversions = listOf(
+        listOf(noteIndices[0], noteIndices[1], noteIndices[2]) to "Root",
+        listOf(noteIndices[1], noteIndices[2], noteIndices[0]) to "1st",
+        listOf(noteIndices[2], noteIndices[0], noteIndices[1]) to "2nd"
+    )
+    return inversions.map { (order, label) ->
+        // Each string can play the note at its lowest fret (base) or one octave up (base+12)
+        val candidates = order.mapIndexed { i, note ->
+            val base = (note - ss.openNotes[i] + 12) % 12
+            listOf(base, base + 12)
+        }
+
+        // Try all 8 combinations; pick the most compact shape with ascending pitch order
+        var bestFrets = candidates.map { it[1] }
+        var bestSpan  = Int.MAX_VALUE
+        var bestMin   = Int.MAX_VALUE
+
+        for (c0 in candidates[0]) {
+            for (c1 in candidates[1]) {
+                for (c2 in candidates[2]) {
+                    val p0 = ss.openPitches[0] + c0
+                    val p1 = ss.openPitches[1] + c1
+                    val p2 = ss.openPitches[2] + c2
+                    if (p0 <= p1 && p1 <= p2) {
+                        val span = maxOf(c0, c1, c2) - minOf(c0, c1, c2)
+                        val minF = minOf(c0, c1, c2)
+                        if (span < bestSpan || (span == bestSpan && minF < bestMin)) {
+                            bestSpan  = span
+                            bestMin   = minF
+                            bestFrets = listOf(c0, c1, c2)
+                        }
+                    }
+                }
+            }
+        }
+
+        bestFrets to label
+    }
+}
 
 // CAGED shapes: name → open-chord root semitone (from C)
 private data class CagedShape(val name: String, val openRoot: Int, val rootString: String)
@@ -753,7 +832,7 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
     var selectedGenre by remember { mutableStateOf("Rock") }
     var selectedKey by remember { mutableStateOf("C") }
     var isMajor by remember { mutableStateOf(true) }
-    val pagerState = rememberPagerState(pageCount = { 8 })
+    val pagerState = rememberPagerState(pageCount = { 9 })
     val selectedTab = pagerState.currentPage
     val scope = rememberCoroutineScope()
 
@@ -877,7 +956,7 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
 
         // Tabs
         ScrollableTabRow(selectedTabIndex = selectedTab, edgePadding = 0.dp) {
-            listOf("Progression", "Scales", "Arpeggios", "Rhythm", "Intervals", "Extensions", "Circle", "CAGED").forEachIndexed { index, title ->
+            listOf("Progression", "Scales", "Arpeggios", "Rhythm", "Intervals", "Extensions", "Circle", "CAGED", "Triads").forEachIndexed { index, title ->
                 Tab(
                     selected = selectedTab == index,
                     onClick  = { scope.launch { pagerState.animateScrollToPage(index) } },
@@ -914,6 +993,7 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
                     }
                 )
                 7 -> CAGEDTab(rootIndex = rootIndex, rootNote = selectedKey)
+                8 -> TriadsTab(rootIndex = rootIndex, rootNote = selectedKey, isMajor = isMajor)
             }
         }
     }
@@ -1632,5 +1712,320 @@ private fun CAGEDTab(rootIndex: Int, rootNote: String) {
             style = MaterialTheme.typography.bodySmall,
             color = onSurfaceVar
         )
+    }
+}
+
+// ── Triads ────────────────────────────────────────────────────────────────────
+
+private data class DiatonicTriad(
+    val roman: String,
+    val triad: TriadType,
+    val noteIndex: Int,
+    val noteNames: List<String>  // display names for root, 3rd, 5th
+)
+
+private fun diatonicTriads(rootIndex: Int, isMajor: Boolean): List<DiatonicTriad> {
+    val scale = if (isMajor) MAJOR_INTERVALS else MINOR_INTERVALS
+    val romanBases = listOf("I", "II", "III", "IV", "V", "VI", "VII")
+
+    return (0..6).map { i ->
+        val noteIndex = (rootIndex + scale[i]) % 12
+        // Interval of the 3rd and 5th built from this scale degree
+        val thirdSemitones = (scale[(i + 2) % 7] + if (i + 2 >= 7) 12 else 0) - scale[i]
+        val fifthSemitones = (scale[(i + 4) % 7] + if (i + 4 >= 7) 12 else 0) - scale[i]
+
+        val triad = TRIAD_TYPES.first {
+            it.intervals[1] == thirdSemitones && it.intervals[2] == fifthSemitones
+        }
+
+        val base = romanBases[i]
+        val roman = when (triad.suffix) {
+            ""  -> base
+            "m" -> base.lowercase()
+            "°" -> base.lowercase() + "°"
+            "+" -> base + "+"
+            else -> base
+        }
+
+        val noteNames = triad.intervals.map { NOTE_DISPLAY_NAMES[(noteIndex + it) % 12] }
+        DiatonicTriad(roman, triad, noteIndex, noteNames)
+    }
+}
+
+@Composable
+private fun TriadsTab(rootIndex: Int, rootNote: String, isMajor: Boolean) {
+    val onSurfaceVar = MaterialTheme.colorScheme.onSurfaceVariant
+    val surfaceVar   = MaterialTheme.colorScheme.surfaceVariant
+
+    val keyLabel = "$rootNote ${if (isMajor) "major" else "minor"}"
+    val triads   = diatonicTriads(rootIndex, isMajor)
+
+    Column(
+        modifier = Modifier
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+            .fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            "Triads — $keyLabel",
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold
+        )
+        Text(
+            "Each scale degree produces a triad by stacking thirds. Shapes are shown for three string sets in root position, 1st inversion, and 2nd inversion.",
+            style = MaterialTheme.typography.bodySmall,
+            color = onSurfaceVar
+        )
+        Spacer(Modifier.height(2.dp))
+
+        // Compact formula reference
+        Card(
+            modifier  = Modifier.fillMaxWidth(),
+            colors    = CardDefaults.cardColors(containerColor = surfaceVar.copy(alpha = 0.5f)),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+        ) {
+            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    "Triad formulas",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = onSurfaceVar
+                )
+                TRIAD_TYPES.forEach { t ->
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("${t.name}  ${t.formula}", style = MaterialTheme.typography.bodySmall)
+                        Text(t.intervalStructure, style = MaterialTheme.typography.bodySmall, color = onSurfaceVar)
+                    }
+                }
+            }
+        }
+
+        Text(
+            "Diatonic triads in $keyLabel",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = onSurfaceVar
+        )
+
+        triads.forEach { dt ->
+            val chordName   = NOTE_NAMES[dt.noteIndex] + dt.triad.suffix
+            val noteIndices = dt.triad.intervals.map { (dt.noteIndex + it) % 12 }
+
+            Card(
+                modifier  = Modifier.fillMaxWidth(),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    // Header row
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            dt.roman,
+                            fontSize   = 16.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = onSurfaceVar
+                        )
+                        Text(
+                            chordName,
+                            fontSize   = 20.sp,
+                            fontWeight = FontWeight.Bold,
+                            color      = MaterialTheme.colorScheme.primary
+                        )
+                        Text(dt.triad.name, style = MaterialTheme.typography.labelSmall, color = onSurfaceVar)
+                        Spacer(Modifier.weight(1f))
+                        Row {
+                            dt.noteNames.forEachIndexed { i, note ->
+                                if (i > 0) Text(" – ", style = MaterialTheme.typography.bodySmall, color = onSurfaceVar)
+                                Text(
+                                    note,
+                                    style      = MaterialTheme.typography.bodySmall,
+                                    fontWeight = if (i == 0) FontWeight.Bold else FontWeight.Normal,
+                                    color      = if (i == 0) MaterialTheme.colorScheme.primary else onSurfaceVar
+                                )
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+
+                    // One row of shapes per string set
+                    TRIAD_STRING_SETS.forEach { ss ->
+                        val shapes = triadShapes(noteIndices, ss)
+                        Text(
+                            "Strings: ${ss.name}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = onSurfaceVar,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Row(modifier = Modifier.fillMaxWidth()) {
+                            shapes.forEach { (frets, invLabel) ->
+                                MiniTriadDiagram(
+                                    frets     = frets,
+                                    strLabels = ss.labels,
+                                    openNotes = ss.openNotes,
+                                    rootNote  = noteIndices[0],
+                                    label     = invLabel,
+                                    modifier  = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
+                }
+            }
+        }
+
+        Text(
+            "Tip: These are the chords that sound natural together in this key. Mix and match to build your own progressions.",
+            style = MaterialTheme.typography.bodySmall,
+            color = onSurfaceVar
+        )
+    }
+}
+
+@Composable
+private fun MiniTriadDiagram(
+    frets: List<Int>,        // [low, mid, high] string frets
+    strLabels: List<String>, // [low, mid, high] string labels
+    openNotes: List<Int>,    // [low, mid, high] open string note indices (0-11)
+    rootNote: Int,           // note index 0-11 of the triad root
+    label: String,           // "Root", "1st", "2nd"
+    modifier: Modifier = Modifier
+) {
+    val primary       = MaterialTheme.colorScheme.primary
+    val onPrimary     = MaterialTheme.colorScheme.onPrimary
+    val secondary     = MaterialTheme.colorScheme.secondary
+    val onSecondary   = MaterialTheme.colorScheme.onSecondary
+    val onSurface     = MaterialTheme.colorScheme.onSurface
+    val onSurfaceVar  = MaterialTheme.colorScheme.onSurfaceVariant
+    val textMeasurer = rememberTextMeasurer()
+
+    // Display top→bottom as high→low string (standard chord diagram orientation)
+    val dispFrets     = frets.reversed()
+    val dispLabels    = strLabels.reversed()
+    val dispOpenNotes = openNotes.reversed()
+
+    val hasOpen   = frets.any { it == 0 }
+    val startFret = if (hasOpen) 0 else frets.min()
+    val numSlots  = maxOf(4, frets.max() - startFret + 1)
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier.padding(horizontal = 2.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = onSurfaceVar)
+        Spacer(Modifier.height(2.dp))
+        Canvas(modifier = Modifier.fillMaxWidth().height(82.dp)) {
+            val dotR      = 6.dp.toPx()
+            // String label column | open-string indicator column | nut | fret slots
+            val strLabelW = 13.dp.toPx()
+            val openIndW  = 14.dp.toPx()   // always present; open circles drawn here
+            val nutW      = if (hasOpen) 5.dp.toPx() else 0f
+
+            val left  = strLabelW + openIndW    // x where fret area begins
+            val right = size.width - 2.dp.toPx()
+
+            // Vertical: ensure dots never clip top/bottom or overlap "fr N" label
+            val firstStrY = dotR + 3.dp.toPx()
+            val lastStrY  = size.height - dotR - 16.dp.toPx()
+            val strGap    = (lastStrY - firstStrY) / 2f
+
+            fun sy(si: Int) = firstStrY + si * strGap
+            val slotW = (right - left - nutW) / numSlots
+            fun cx(slot: Int) = left + nutW + slotW * slot + slotW / 2f
+
+            // String lines (top = high, bottom = low)
+            for (si in 0..2) {
+                val y = sy(si)
+                drawLine(
+                    color = onSurfaceVar.copy(alpha = 0.45f),
+                    start = Offset(left, y), end = Offset(right, y),
+                    strokeWidth = 1.5.dp.toPx()
+                )
+                // String label (G, B, e etc.)
+                val lm = textMeasurer.measure(
+                    dispLabels[si],
+                    TextStyle(fontSize = 8.sp, color = onSurfaceVar)
+                )
+                drawText(lm, topLeft = Offset(0f, y - lm.size.height / 2f))
+            }
+
+            // Nut or left border of fret area
+            if (hasOpen) {
+                drawLine(
+                    onSurface,
+                    Offset(left + nutW / 2f, firstStrY - 3.dp.toPx()),
+                    Offset(left + nutW / 2f, lastStrY + 3.dp.toPx()),
+                    strokeWidth = nutW,
+                    cap = androidx.compose.ui.graphics.StrokeCap.Square
+                )
+            } else {
+                drawLine(
+                    onSurfaceVar.copy(alpha = 0.3f),
+                    Offset(left, firstStrY), Offset(left, lastStrY),
+                    strokeWidth = 1.5.dp.toPx()
+                )
+            }
+
+            // Fret wires
+            for (f in 1..numSlots) {
+                val x = left + nutW + slotW * f
+                drawLine(
+                    onSurfaceVar.copy(alpha = 0.25f),
+                    Offset(x, firstStrY), Offset(x, lastStrY),
+                    strokeWidth = 1.dp.toPx()
+                )
+            }
+
+            // Dots + note names
+            for (si in 0..2) {
+                val fret      = dispFrets[si]
+                val y         = sy(si)
+                val noteIdx   = (dispOpenNotes[si] + fret) % 12
+                val noteName  = NOTE_NAMES[noteIdx]
+                val isRoot    = noteIdx == rootNote
+                val dotColor  = if (isRoot) secondary else primary
+                val textColor = if (isRoot) onSecondary else onPrimary
+
+                if (fret == 0) {
+                    // Open string: outlined circle in the openIndW area
+                    val cx = strLabelW + openIndW / 2f
+                    drawCircle(
+                        color  = dotColor,
+                        radius = dotR,
+                        center = Offset(cx, y),
+                        style  = Stroke(width = 1.5.dp.toPx())
+                    )
+                    val nm = textMeasurer.measure(
+                        noteName,
+                        TextStyle(fontSize = 6.sp, color = dotColor, fontWeight = FontWeight.Bold)
+                    )
+                    drawText(nm, topLeft = Offset(cx - nm.size.width / 2f, y - nm.size.height / 2f))
+                } else {
+                    val slot = fret - startFret
+                    if (slot in 0 until numSlots) {
+                        val cx = cx(slot)
+                        drawCircle(dotColor, dotR, Offset(cx, y))
+                        val nm = textMeasurer.measure(
+                            noteName,
+                            TextStyle(fontSize = 6.sp, color = textColor, fontWeight = FontWeight.Bold)
+                        )
+                        drawText(nm, topLeft = Offset(cx - nm.size.width / 2f, y - nm.size.height / 2f))
+                    }
+                }
+            }
+
+            // Fret position label for non-open shapes
+            if (!hasOpen) {
+                val lm = textMeasurer.measure(
+                    "fr $startFret",
+                    TextStyle(fontSize = 7.sp, color = onSurfaceVar)
+                )
+                drawText(lm, topLeft = Offset(left, lastStrY + dotR + 2.dp.toPx()))
+            }
+        }
     }
 }
