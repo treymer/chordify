@@ -1,6 +1,7 @@
 package com.example.myapplication
 
 import android.Manifest
+import android.content.Context
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
@@ -66,6 +67,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -101,7 +104,8 @@ enum class AppMode {
     KEY_FINDER,
     METRONOME,
     SUGGESTER,
-    FRETBOARD
+    FRETBOARD,
+    LEGAL
 }
 
 class MainActivity : ComponentActivity() {
@@ -110,6 +114,7 @@ class MainActivity : ComponentActivity() {
     private var tunerNote by mutableStateOf("--")
     private var tunerCents by mutableStateOf(0f)
     private var isRecording by mutableStateOf(false)
+    private var showOnboarding by mutableStateOf(false)
     // Tuner stability: rolling window of last 4 MIDI note detections.
     // Display the note only when it's the majority in the window — tolerates
     // occasional missed/wrong frames without requiring consecutive matches.
@@ -128,9 +133,15 @@ class MainActivity : ComponentActivity() {
     private var isMetronomeRunning by mutableStateOf(false)
     private var metronomeBpm by mutableStateOf(120)
     private var isBeat by mutableStateOf(false)
+    private var metronomeTimeSig by mutableStateOf("4/4")
+    private var metronomeBeatIndex by mutableStateOf(0)
     private val metronomeScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var metronomeJob: Job? = null
     private val tapTimestamps = mutableListOf<Long>()
+
+    // State for Tuner preferences
+    private var tunerA4 by mutableStateOf(440)
+    private var tunerPreferFlats by mutableStateOf(false)
 
     private var pendingRecordingMode: AppMode? = null
 
@@ -146,6 +157,17 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Show onboarding only on first launch; mark it complete once the user finishes/skips.
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        showOnboarding = !prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)
+
+        // Restore persisted preferences
+        metronomeBpm      = prefs.getInt(KEY_BPM, 120)
+        metronomeTimeSig  = prefs.getString(KEY_TIME_SIG, "4/4") ?: "4/4"
+        tunerA4           = prefs.getInt(KEY_TUNER_A4, 440)
+        tunerPreferFlats  = prefs.getBoolean(KEY_TUNER_PREFER_FLATS, false)
+
         setContent {
             CadenceTheme {
                 MainScreen(
@@ -156,14 +178,38 @@ class MainActivity : ComponentActivity() {
                     foundKey = foundKey,
                     isMetronomeRunning = isMetronomeRunning,
                     metronomeBpm = metronomeBpm,
+                    metronomeTimeSig = metronomeTimeSig,
+                    metronomeBeatIndex = metronomeBeatIndex,
                     isBeat = isBeat,
+                    tunerA4 = tunerA4,
+                    tunerPreferFlats = tunerPreferFlats,
+                    showOnboarding = showOnboarding,
                     onStartRecording = ::startRecording,
                     onStopRecording = ::stopRecording,
                     onResetKeyFinder = ::resetKeyFinder,
                     onStartMetronome = ::startMetronome,
                     onStopMetronome = ::stopMetronome,
-                    onBpmChange = { metronomeBpm = it },
-                    onTapTempo = ::onTapTempo
+                    onBpmChange = { newBpm ->
+                        metronomeBpm = newBpm
+                        prefs.edit().putInt(KEY_BPM, newBpm).apply()
+                    },
+                    onTimeSigChange = { sig ->
+                        metronomeTimeSig = sig
+                        prefs.edit().putString(KEY_TIME_SIG, sig).apply()
+                    },
+                    onTunerA4Change = { a4 ->
+                        tunerA4 = a4
+                        prefs.edit().putInt(KEY_TUNER_A4, a4).apply()
+                    },
+                    onTunerPreferFlatsChange = { flat ->
+                        tunerPreferFlats = flat
+                        prefs.edit().putBoolean(KEY_TUNER_PREFER_FLATS, flat).apply()
+                    },
+                    onTapTempo = ::onTapTempo,
+                    onOnboardingComplete = {
+                        showOnboarding = false
+                        prefs.edit().putBoolean(KEY_ONBOARDING_COMPLETE, true).apply()
+                    }
                 )
             }
         }
@@ -190,8 +236,9 @@ class MainActivity : ComponentActivity() {
             val isValidPitch = pitchInHz in 70f..1300f && confidence > 0.65f
 
             if (isValidPitch) {
-                val a4 = 440.0
+                val a4 = tunerA4.toDouble()
                 val midiNote = (12 * (Math.log(pitchInHz.toDouble() / a4) / Math.log(2.0)) + 69).roundToInt()
+                // Sharp names used internally; display layer maps to flats when tunerPreferFlats is on.
                 val noteNames = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
                 val detectedNote = noteNames[midiNote % 12]
 
@@ -223,14 +270,17 @@ class MainActivity : ComponentActivity() {
                     runOnUiThread {
                         when (mode) {
                             AppMode.TUNER -> {
-                                tunerNote = noteNames[((dominantNoteClass!! % 12) + 12) % 12]
+                                val sharpName = noteNames[((dominantNoteClass!! % 12) + 12) % 12]
+                                tunerNote = if (tunerPreferFlats) SHARP_TO_FLAT[sharpName] ?: sharpName else sharpName
                                 tunerCents = smoothedCents
                             }
                             AppMode.KEY_FINDER -> {
                                 val currentTime = System.currentTimeMillis()
                                 if (currentTime - lastKeyNoteDetectionTime > 2000) {
-                                    if (detectedNote.isNotEmpty() && !detectedKeyNotes.contains(detectedNote)) {
-                                        detectedKeyNotes.add(detectedNote)
+                                    // Normalize to flat enharmonic so it matches the musicTheory dictionary
+                                    val normalizedNote = SHARP_TO_FLAT[detectedNote] ?: detectedNote
+                                    if (normalizedNote.isNotEmpty() && !detectedKeyNotes.contains(normalizedNote)) {
+                                        detectedKeyNotes.add(normalizedNote)
                                         lastKeyNoteDetectionTime = currentTime
                                     }
                                 }
@@ -243,6 +293,7 @@ class MainActivity : ComponentActivity() {
                             AppMode.SUGGESTER  -> {}
                             AppMode.FRETBOARD  -> {}
                             AppMode.HOME       -> {}
+                            AppMode.LEGAL      -> {}
                         }
                     }
                 }
@@ -293,10 +344,12 @@ class MainActivity : ComponentActivity() {
 
     private fun startMetronome() {
         isMetronomeRunning = true
+        metronomeBeatIndex = 0
         // Run on IO — audioTrack.write() is a blocking call
         metronomeJob = metronomeScope.launch(Dispatchers.IO) {
             val sampleRate = 44100
-            val clickSamples = generateClick(sampleRate)
+            val accentClick = generateClick(sampleRate, freq = 1600.0, amplitude = 1.0)
+            val normalClick = generateClick(sampleRate, freq = 1000.0, amplitude = 0.65)
             val minBufSize = AudioTrack.getMinBufferSize(
                 sampleRate, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT
             )
@@ -323,17 +376,28 @@ class MainActivity : ComponentActivity() {
 
             // Used to compensate if write() returns early (e.g. first beat with empty buffer)
             var nextBeatNs = System.nanoTime()
+            var localBeatIndex = 0
 
             try {
                 while (isActive) {
-                    val samplesPerBeat = (sampleRate * 60.0 / metronomeBpm).toInt()
+                    val beatsPerBar = timeSigBeats(metronomeTimeSig)
+                    // 6/8 counts in 6 eighth-notes; effective BPM for the eighth note is bpm*2
+                    val effectiveBpm = if (metronomeTimeSig == "6/8") metronomeBpm * 2 else metronomeBpm
+                    val samplesPerBeat = (sampleRate * 60.0 / effectiveBpm).toInt()
                     val beatBuffer = ShortArray(samplesPerBeat)
-                    val copyLen = minOf(clickSamples.size, samplesPerBeat)
-                    clickSamples.copyInto(beatBuffer, 0, 0, copyLen)
+                    val isAccent = localBeatIndex == 0
+                    val clickSrc = if (isAccent) accentClick else normalClick
+                    val copyLen = minOf(clickSrc.size, samplesPerBeat)
+                    clickSrc.copyInto(beatBuffer, 0, 0, copyLen)
 
                     isBeat = true
+                    val capturedBeat = localBeatIndex
                     // Reset the visual flash independently — don't block the audio write
-                    metronomeScope.launch { delay(80); isBeat = false }
+                    metronomeScope.launch {
+                        delay(80)
+                        isBeat = false
+                    }
+                    runOnUiThread { metronomeBeatIndex = capturedBeat }
 
                     // Blocks for ~one beat period while the hardware drains the buffer
                     audioTrack.write(beatBuffer, 0, beatBuffer.size)
@@ -341,9 +405,11 @@ class MainActivity : ComponentActivity() {
                     // On the first beat the buffer starts empty, so write() returns slightly
                     // early. Use wall-clock time to pad any remaining time so every beat
                     // interval is uniform.
-                    nextBeatNs += 60_000_000_000L / metronomeBpm
+                    nextBeatNs += 60_000_000_000L / effectiveBpm
                     val driftNs = nextBeatNs - System.nanoTime()
                     if (driftNs > 1_000_000L) delay(driftNs / 1_000_000L)
+
+                    localBeatIndex = (localBeatIndex + 1) % beatsPerBar
                 }
             } finally {
                 audioTrack.stop()
@@ -357,6 +423,7 @@ class MainActivity : ComponentActivity() {
         metronomeJob?.cancel()
         isMetronomeRunning = false
         isBeat = false
+        metronomeBeatIndex = 0
     }
 
     private fun onTapTempo() {
@@ -374,15 +441,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun generateClick(sampleRate: Int): ShortArray {
+    private fun generateClick(sampleRate: Int, freq: Double = 1000.0, amplitude: Double = 1.0): ShortArray {
         val numSamples = sampleRate * 30 / 1000  // 30ms click
         val buffer = ShortArray(numSamples)
-        val freq = 1000.0
         for (i in 0 until numSamples) {
             val envelope = 1.0 - i.toDouble() / numSamples
-            buffer[i] = (envelope * sin(2 * PI * freq * i / sampleRate) * Short.MAX_VALUE).toInt().toShort()
+            buffer[i] = (amplitude * envelope * sin(2 * PI * freq * i / sampleRate) * Short.MAX_VALUE).toInt().toShort()
         }
         return buffer
+    }
+
+    private fun timeSigBeats(sig: String): Int = when (sig) {
+        "2/4" -> 2; "3/4" -> 3; "4/4" -> 4; "5/4" -> 5; "6/8" -> 6
+        else -> 4
     }
 
     override fun onStop() {
@@ -397,6 +468,21 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        const val PREFS_NAME              = "cadence_prefs"
+        const val KEY_ONBOARDING_COMPLETE = "onboarding_complete"
+        const val KEY_BPM                 = "metronome_bpm"
+        const val KEY_TIME_SIG            = "metronome_time_sig"
+        const val KEY_TUNER_A4            = "tuner_a4"
+        const val KEY_TUNER_PREFER_FLATS  = "tuner_prefer_flats"
+
+        // Maps sharp note names to their flat enharmonic equivalents.
+        // Used to normalize pitch-detector output before key-finder matching
+        // and for the tuner's flat-display mode.
+        val SHARP_TO_FLAT = mapOf(
+            "C#" to "Db", "D#" to "Eb", "F#" to "Gb",
+            "G#" to "Ab", "A#" to "Bb"
+        )
+
         val musicTheory = mapOf(
             "C Major" to listOf("C", "D", "E", "F", "G", "A", "B"),
             "G Major" to listOf("G", "A", "B", "C", "D", "E", "F#"),
@@ -436,26 +522,47 @@ class MainActivity : ComponentActivity() {
 fun MainScreen(
     tunerNote: String,
     tunerCents: Float,
+    tunerA4: Int,
+    tunerPreferFlats: Boolean,
     isRecording: Boolean,
     detectedKeyNotes: List<String>,
     foundKey: String,
     isMetronomeRunning: Boolean,
     metronomeBpm: Int,
+    metronomeTimeSig: String,
+    metronomeBeatIndex: Int,
     isBeat: Boolean,
+    showOnboarding: Boolean,
     onStartRecording: (AppMode) -> Unit,
     onStopRecording: () -> Unit,
     onResetKeyFinder: () -> Unit,
     onStartMetronome: () -> Unit,
     onStopMetronome: () -> Unit,
     onBpmChange: (Int) -> Unit,
-    onTapTempo: () -> Unit
+    onTimeSigChange: (String) -> Unit,
+    onTunerA4Change: (Int) -> Unit,
+    onTunerPreferFlatsChange: (Boolean) -> Unit,
+    onTapTempo: () -> Unit,
+    onOnboardingComplete: () -> Unit
 ) {
+    // Show the onboarding flow fullscreen until the user finishes or skips it.
+    if (showOnboarding) {
+        OnboardingScreen(onFinish = onOnboardingComplete)
+        return
+    }
+
     var appMode by remember { mutableStateOf(AppMode.HOME) }
 
     fun switchMode(mode: AppMode) {
         onResetKeyFinder()
-        onStopMetronome()
+        // Metronome intentionally NOT stopped on tab switch — user must tap Stop explicitly.
         appMode = mode
+    }
+
+    // LEGAL is a fullscreen overlay — no nav bar, no scaffold chrome.
+    if (appMode == AppMode.LEGAL) {
+        LegalScreen(onBack = { appMode = AppMode.HOME })
+        return
     }
 
     Scaffold(
@@ -480,13 +587,20 @@ fun MainScreen(
                 }
         ) {
             when (appMode) {
-                AppMode.HOME -> HomeScreen(onNavigate = ::switchMode)
+                AppMode.HOME -> HomeScreen(
+                    onNavigate = ::switchMode,
+                    onOpenLegal = { appMode = AppMode.LEGAL }
+                )
                 AppMode.TUNER -> TunerScreen(
                     note = tunerNote,
                     cents = tunerCents,
                     isRecording = isRecording,
+                    a4 = tunerA4,
+                    preferFlats = tunerPreferFlats,
                     onStartRecording = { onStartRecording(AppMode.TUNER) },
-                    onStopRecording = onStopRecording
+                    onStopRecording = onStopRecording,
+                    onA4Change = onTunerA4Change,
+                    onPreferFlatsChange = onTunerPreferFlatsChange
                 )
                 AppMode.KEY_FINDER -> KeyFinderScreen(
                     notes = detectedKeyNotes,
@@ -497,15 +611,19 @@ fun MainScreen(
                 )
                 AppMode.METRONOME -> MetronomeScreen(
                     bpm = metronomeBpm,
+                    timeSig = metronomeTimeSig,
+                    beatIndex = metronomeBeatIndex,
                     isRunning = isMetronomeRunning,
                     isBeat = isBeat,
                     onBpmChange = onBpmChange,
+                    onTimeSigChange = onTimeSigChange,
                     onStart = onStartMetronome,
                     onStop = onStopMetronome,
                     onTapTempo = onTapTempo
                 )
                 AppMode.SUGGESTER  -> SuggesterScreen()
                 AppMode.FRETBOARD -> FretboardScreen()
+                AppMode.LEGAL      -> {} // handled above; unreachable here
             }
         }
     }
@@ -559,14 +677,21 @@ private fun tempoLabel(bpm: Int): String = when {
 @Composable
 fun MetronomeScreen(
     bpm: Int,
+    timeSig: String,
+    beatIndex: Int,
     isRunning: Boolean,
     isBeat: Boolean,
     onBpmChange: (Int) -> Unit,
+    onTimeSigChange: (String) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onTapTempo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val timeSigs = listOf("2/4", "3/4", "4/4", "5/4", "6/8")
+    val beatsPerBar = when (timeSig) {
+        "2/4" -> 2; "3/4" -> 3; "4/4" -> 4; "5/4" -> 5; "6/8" -> 6; else -> 4
+    }
     val beatColor = if (isBeat) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
     val beatScale by animateFloatAsState(
         targetValue = if (isBeat) 1.28f else 1f,
@@ -583,7 +708,59 @@ fun MetronomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text("Metronome", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-        Spacer(Modifier.height(32.dp))
+        Spacer(Modifier.height(16.dp))
+
+        // Time signature selector
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            timeSigs.forEach { sig ->
+                androidx.compose.material3.FilterChip(
+                    selected = timeSig == sig,
+                    onClick = { onTimeSigChange(sig) },
+                    label = { Text(sig) }
+                )
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+
+        // Beat indicator dots — one per beat in the bar
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            repeat(beatsPerBar) { i ->
+                val isThisBeat = isRunning && beatIndex == i
+                val isAccent = i == 0
+                val dotScale by animateFloatAsState(
+                    targetValue = if (isThisBeat) 1.4f else 1f,
+                    animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                    label = "dot$i"
+                )
+                Box(
+                    modifier = Modifier
+                        .size(if (isAccent) 20.dp else 14.dp)
+                        .scale(dotScale)
+                        .clip(CircleShape)
+                        .background(
+                            when {
+                                isThisBeat && isAccent -> MaterialTheme.colorScheme.primary
+                                isThisBeat -> MaterialTheme.colorScheme.secondary
+                                isAccent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                                else -> MaterialTheme.colorScheme.surfaceVariant
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "${i + 1}",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = TextStyle(
+                            fontSize = if (isAccent) 9.sp else 7.sp,
+                            lineHeight = if (isAccent) 9.sp else 7.sp,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)
+                        )
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
 
         Box(
             modifier = Modifier
@@ -643,7 +820,11 @@ fun TunerScreen(
     onStopRecording: () -> Unit,
     note: String,
     cents: Float,
-    isRecording: Boolean
+    isRecording: Boolean,
+    a4: Int = 440,
+    preferFlats: Boolean = false,
+    onA4Change: (Int) -> Unit = {},
+    onPreferFlatsChange: (Boolean) -> Unit = {}
 ) {
     val inTune = isRecording && note != "--" && abs(cents) <= 10f
     val needleColor = when {
@@ -672,7 +853,32 @@ fun TunerScreen(
             color = MaterialTheme.colorScheme.primary
         )
 
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(8.dp))
+
+        // A4 reference pitch and flat/sharp toggle row
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            OutlinedButton(
+                onClick = { onA4Change((a4 - 1).coerceAtLeast(430)) },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.size(width = 36.dp, height = 32.dp)
+            ) { Text("-", fontSize = 14.sp) }
+            Text("A4 = $a4 Hz", style = MaterialTheme.typography.bodyMedium)
+            OutlinedButton(
+                onClick = { onA4Change((a4 + 1).coerceAtMost(455)) },
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.size(width = 36.dp, height = 32.dp)
+            ) { Text("+", fontSize = 14.sp) }
+            androidx.compose.material3.FilterChip(
+                selected = preferFlats,
+                onClick = { onPreferFlatsChange(!preferFlats) },
+                label = { Text(if (preferFlats) "♭" else "♯", fontSize = 16.sp) }
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
 
         // Semicircle gauge
         TunerGauge(cents = cents, needleColor = needleColor, isActive = isRecording && note != "--")
@@ -965,6 +1171,6 @@ fun KeyFinderScreenPreview() {
 @Composable
 fun MetronomeScreenPreview() {
     CadenceTheme {
-        MetronomeScreen(bpm = 120, isRunning = false, isBeat = false, onBpmChange = {}, onStart = {}, onStop = {}, onTapTempo = {})
+        MetronomeScreen(bpm = 120, timeSig = "4/4", beatIndex = 0, isRunning = false, isBeat = false, onBpmChange = {}, onTimeSigChange = {}, onStart = {}, onStop = {}, onTapTempo = {})
     }
 }

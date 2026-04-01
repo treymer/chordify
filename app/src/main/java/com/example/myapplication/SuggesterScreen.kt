@@ -829,18 +829,19 @@ private val GENRE_DATA = mapOf(
 
 @Composable
 fun SuggesterScreen(modifier: Modifier = Modifier) {
-    var selectedGenre by remember { mutableStateOf("Rock") }
-    var selectedKey by remember { mutableStateOf("C") }
-    var isMajor by remember { mutableStateOf(true) }
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("cadence_prefs", Context.MODE_PRIVATE) }
+
+    var selectedGenre by remember { mutableStateOf(prefs.getString("suggester_genre", "Rock") ?: "Rock") }
+    var selectedKey by remember { mutableStateOf(prefs.getString("suggester_key", "C") ?: "C") }
+    var isMajor by remember { mutableStateOf(prefs.getBoolean("suggester_is_major", true)) }
     val pagerState = rememberPagerState(pageCount = { 9 })
     val selectedTab = pagerState.currentPage
     val scope = rememberCoroutineScope()
 
-    val rootIndex = NOTE_NAMES.indexOf(selectedKey)
-    val data = GENRE_DATA[selectedGenre]!!
+    val rootIndex = NOTE_NAMES.indexOf(selectedKey).coerceAtLeast(0)
+    val data = GENRE_DATA[selectedGenre] ?: GENRE_DATA["Rock"]!!
 
-    val context = LocalContext.current
-    val prefs = remember { context.getSharedPreferences("cadence_prefs", Context.MODE_PRIVATE) }
     var favorites by remember { mutableStateOf(prefs.getStringSet("favorites", emptySet())!!.toSet()) }
     fun toggleFavorite(key: String) {
         favorites = if (key in favorites) favorites - key else favorites + key
@@ -866,7 +867,10 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
                 GENRES.forEach { genre ->
                     FilterChip(
                         selected = selectedGenre == genre,
-                        onClick = { selectedGenre = genre },
+                        onClick = {
+                            selectedGenre = genre
+                            prefs.edit().putString("suggester_genre", genre).apply()
+                        },
                         label = { Text(genre) },
                         modifier = Modifier.padding(end = 6.dp)
                     )
@@ -884,19 +888,31 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
                 Text("Key", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FilterChip(
                     selected = isMajor,
-                    onClick = { isMajor = true },
+                    onClick = {
+                        isMajor = true
+                        prefs.edit().putBoolean("suggester_is_major", true).apply()
+                    },
                     label = { Text("Major") }
                 )
                 FilterChip(
                     selected = !isMajor,
-                    onClick = { isMajor = false },
+                    onClick = {
+                        isMajor = false
+                        prefs.edit().putBoolean("suggester_is_major", false).apply()
+                    },
                     label = { Text("Minor") }
                 )
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { selectedKey = NOTE_NAMES[(rootIndex - 1 + 12) % 12] }) {
+                IconButton(onClick = {
+                    selectedKey = NOTE_NAMES[(rootIndex - 1 + 12) % 12]
+                    prefs.edit().putString("suggester_key", selectedKey).apply()
+                }) {
                     Icon(Icons.Filled.ChevronLeft, contentDescription = "Semitone down")
                 }
-                IconButton(onClick = { selectedKey = NOTE_NAMES[(rootIndex + 1) % 12] }) {
+                IconButton(onClick = {
+                    selectedKey = NOTE_NAMES[(rootIndex + 1) % 12]
+                    prefs.edit().putString("suggester_key", selectedKey).apply()
+                }) {
                     Icon(Icons.Filled.ChevronRight, contentDescription = "Semitone up")
                 }
             }
@@ -905,7 +921,10 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
                 NOTE_NAMES.forEachIndexed { i, note ->
                     FilterChip(
                         selected = selectedKey == note,
-                        onClick = { selectedKey = note },
+                        onClick = {
+                            selectedKey = note
+                            prefs.edit().putString("suggester_key", note).apply()
+                        },
                         label = { Text(NOTE_DISPLAY_NAMES[i]) },
                         modifier = Modifier.padding(end = 6.dp)
                     )
@@ -923,9 +942,11 @@ fun SuggesterScreen(modifier: Modifier = Modifier) {
                     if (isMajor) {
                         selectedKey = NOTE_NAMES[(rootIndex + 9) % 12]
                         isMajor = false
+                        prefs.edit().putString("suggester_key", selectedKey).putBoolean("suggester_is_major", false).apply()
                     } else {
                         selectedKey = NOTE_NAMES[(rootIndex + 3) % 12]
                         isMajor = true
+                        prefs.edit().putString("suggester_key", selectedKey).putBoolean("suggester_is_major", true).apply()
                     }
                 }
             ) {

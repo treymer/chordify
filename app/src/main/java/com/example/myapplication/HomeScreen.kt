@@ -13,8 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,11 +48,31 @@ private val FEATURES = listOf(
 )
 
 @Composable
-fun HomeScreen(onNavigate: (AppMode) -> Unit, modifier: Modifier = Modifier) {
+fun HomeScreen(
+    onNavigate: (AppMode) -> Unit,
+    onOpenLegal: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     Column(
         modifier = modifier.fillMaxSize(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
+        // ── Info / Legal button ───────────────────────────────────────────────
+        Row(
+            modifier              = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            IconButton(onClick = onOpenLegal) {
+                Icon(
+                    imageVector        = Icons.Outlined.Info,
+                    contentDescription = "Privacy & Terms",
+                    tint               = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         // ── Header ───────────────────────────────────────────────────────────
         Column(
             modifier = Modifier.weight(1f),
