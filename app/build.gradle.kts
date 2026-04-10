@@ -21,8 +21,8 @@ android {
         applicationId = "dev.treymer.cadence"
         minSdk = 24
         targetSdk = 36
-        versionCode = (System.getenv("VERSION_CODE")?.toIntOrNull()) ?: 4
-        versionName = "1.7"
+        versionCode = (System.getenv("VERSION_CODE")?.toIntOrNull()) ?: 5
+        versionName = "1.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -64,6 +64,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     lint {
         baseline = file("lint-baseline.xml")

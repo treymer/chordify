@@ -76,6 +76,7 @@ import com.example.myapplication.ui.theme.CrimsonError
 import com.example.myapplication.ui.theme.EmberOrange
 import com.example.myapplication.ui.theme.MagicPurple
 import com.example.myapplication.ui.theme.TuneGreen
+import androidx.compose.runtime.collectAsState
 import kotlin.math.abs
 import kotlin.math.cos
 import androidx.core.content.ContextCompat
@@ -105,10 +106,13 @@ enum class AppMode {
     METRONOME,
     SUGGESTER,
     FRETBOARD,
-    LEGAL
+    LEGAL,
+    PRO_UPGRADE
 }
 
 class MainActivity : ComponentActivity() {
+
+    private lateinit var billingManager: BillingManager
 
     private var dispatcher: AudioDispatcher? = null
     private var tunerNote by mutableStateOf("--")
@@ -158,6 +162,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
+        // Initialise billing and connect to Play Store.
+        billingManager = BillingManager(applicationContext)
+        billingManager.connect()
+
         // Show onboarding only on first launch; mark it complete once the user finishes/skips.
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         showOnboarding = !prefs.getBoolean(KEY_ONBOARDING_COMPLETE, false)
@@ -184,6 +192,7 @@ class MainActivity : ComponentActivity() {
                     tunerA4 = tunerA4,
                     tunerPreferFlats = tunerPreferFlats,
                     showOnboarding = showOnboarding,
+                    billingManager = billingManager,
                     onStartRecording = ::startRecording,
                     onStopRecording = ::stopRecording,
                     onResetKeyFinder = ::resetKeyFinder,
@@ -289,11 +298,12 @@ class MainActivity : ComponentActivity() {
                                     stopRecording()
                                 }
                             }
-                            AppMode.METRONOME  -> {}
-                            AppMode.SUGGESTER  -> {}
-                            AppMode.FRETBOARD  -> {}
-                            AppMode.HOME       -> {}
-                            AppMode.LEGAL      -> {}
+                            AppMode.METRONOME   -> {}
+                            AppMode.SUGGESTER   -> {}
+                            AppMode.FRETBOARD   -> {}
+                            AppMode.HOME        -> {}
+                            AppMode.LEGAL       -> {}
+                            AppMode.PRO_UPGRADE -> {}
                         }
                     }
                 }
@@ -465,6 +475,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         metronomeScope.cancel()
+        billingManager.endConnection()
     }
 
     companion object {
@@ -533,6 +544,7 @@ fun MainScreen(
     metronomeBeatIndex: Int,
     isBeat: Boolean,
     showOnboarding: Boolean,
+    billingManager: BillingManager,
     onStartRecording: (AppMode) -> Unit,
     onStopRecording: () -> Unit,
     onResetKeyFinder: () -> Unit,
@@ -551,10 +563,28 @@ fun MainScreen(
         return
     }
 
+    val isPro by billingManager.isPro.collectAsState()
+
     var appMode by remember { mutableStateOf(AppMode.HOME) }
+    // When the user is on the paywall and Pro becomes true (purchase completes),
+    // automatically navigate to the feature they originally tried to reach.
+    var pendingProMode by remember { mutableStateOf<AppMode?>(null) }
+
+    // Auto-navigate on successful purchase
+    if (isPro && appMode == AppMode.PRO_UPGRADE) {
+        val dest = pendingProMode ?: AppMode.HOME
+        appMode = dest
+        pendingProMode = null
+    }
 
     fun switchMode(mode: AppMode) {
         onResetKeyFinder()
+        // Gate Theory and Note Finder behind Pro.
+        if (!isPro && (mode == AppMode.SUGGESTER || mode == AppMode.FRETBOARD)) {
+            pendingProMode = mode
+            appMode = AppMode.PRO_UPGRADE
+            return
+        }
         // Metronome intentionally NOT stopped on tab switch — user must tap Stop explicitly.
         appMode = mode
     }
@@ -562,6 +592,19 @@ fun MainScreen(
     // LEGAL is a fullscreen overlay — no nav bar, no scaffold chrome.
     if (appMode == AppMode.LEGAL) {
         LegalScreen(onBack = { appMode = AppMode.HOME })
+        return
+    }
+
+    // PRO_UPGRADE is a fullscreen overlay — no nav bar.
+    if (appMode == AppMode.PRO_UPGRADE) {
+        ProUpgradeScreen(
+            targetMode = pendingProMode ?: AppMode.SUGGESTER,
+            billingManager = billingManager,
+            onBack = {
+                appMode = AppMode.HOME
+                pendingProMode = null
+            }
+        )
         return
     }
 
@@ -621,9 +664,10 @@ fun MainScreen(
                     onStop = onStopMetronome,
                     onTapTempo = onTapTempo
                 )
-                AppMode.SUGGESTER  -> SuggesterScreen()
-                AppMode.FRETBOARD -> FretboardScreen()
+                AppMode.SUGGESTER   -> SuggesterScreen()
+                AppMode.FRETBOARD  -> FretboardScreen()
                 AppMode.LEGAL      -> {} // handled above; unreachable here
+                AppMode.PRO_UPGRADE -> {} // handled above; unreachable here
             }
         }
     }
