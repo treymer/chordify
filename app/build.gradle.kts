@@ -21,8 +21,8 @@ android {
         applicationId = "dev.treymer.cadence"
         minSdk = 24
         targetSdk = 36
-        versionCode = (System.getenv("VERSION_CODE")?.toIntOrNull()) ?: 5
-        versionName = "1.8"
+        versionCode = (System.getenv("VERSION_CODE")?.toIntOrNull()) ?: 6
+        versionName = "1.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

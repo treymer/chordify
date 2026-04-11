@@ -42,10 +42,7 @@ class BillingManager(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    // In debug builds, isPro defaults to true so Pro-gated features are freely accessible
-    // during development without needing a real Play Store purchase.
-    // In release builds this starts false and requires a real purchase.
-    private val _isPro = MutableStateFlow(BuildConfig.DEBUG)
+    private val _isPro = MutableStateFlow(false)
     val isPro: StateFlow<Boolean> = _isPro.asStateFlow()
 
     // Cached product details so we can launch the purchase flow without a second query.
